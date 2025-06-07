@@ -95,12 +95,12 @@ jobs:
               if decision['name'] in existing_repos:
                   print(f'Repository {decision["name"]} already exists')
               else:
-                  # Create new repository
+                  # Create new repository (FIXED: use private=False)
                   new_repo = org.create_repo(
                       name=decision['name'],
                       description=f"🤖 {decision['description']}",
                       auto_init=True,
-                      public=True
+                      private=False  # FIXED: changed from public=True
                   )
                   print(f'✅ Created: {new_repo.html_url}')
                   
