@@ -110,6 +110,8 @@ jobs:
           import os
           import yaml
           import random
+          import re
+          import traceback
           from datetime import datetime
           
           class ClaudeMasterBrain:
@@ -119,6 +121,21 @@ jobs:
                   self.org = self.g.get_organization('CodeWebMobile-AI')
                   self.master_plan = []
                   self.market_intel = json.loads(os.environ.get('MARKET_INTEL', '{}'))
+                  
+              def extract_json_from_response(self, text):
+                  """Extract JSON from Claude's response, handling various formats"""
+                  # Try to find JSON between ```json and ``` markers
+                  json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
+                  if json_match:
+                      return json_match.group(1)
+                  
+                  # Try to find JSON between { and }
+                  json_match = re.search(r'\{.*\}', text, re.DOTALL)
+                  if json_match:
+                      return json_match.group(0)
+                  
+                  # Return original text if no patterns found
+                  return text
                   
               def analyze_market_opportunity(self, project_idea):
                   """Analyze market opportunity for a project idea"""
@@ -135,7 +152,7 @@ jobs:
                   4. Revenue potential
                   5. Innovation factor
                   
-                  Return JSON:
+                  Return ONLY valid JSON in this exact format:
                   {{
                       "score": 1-10,
                       "analysis": "detailed reasoning",
@@ -143,21 +160,51 @@ jobs:
                       "unique_value_prop": "what makes this special"
                   }}"""
                   
-                  response = self.claude.messages.create(
-                      model='claude-3-opus-20240229',
-                      max_tokens=2000,
-                      messages=[{'role': 'user', 'content': market_prompt}]
-                  )
-                  
-                  return json.loads(response.content[0].text)
+                  try:
+                      print(f"🔍 Analyzing market opportunity for: {project_idea}")
+                      response = self.claude.messages.create(
+                          model='claude-3-opus-20240229',
+                          max_tokens=2000,
+                          messages=[{'role': 'user', 'content': market_prompt}]
+                      )
+                      
+                      raw_response = response.content[0].text
+                      print(f"📝 Raw Claude response: {raw_response[:200]}...")
+                      
+                      json_text = self.extract_json_from_response(raw_response)
+                      result = json.loads(json_text)
+                      print(f"✅ Market analysis successful. Score: {result.get('score', 'N/A')}/10")
+                      return result
+                      
+                  except json.JSONDecodeError as e:
+                      print(f"❌ JSON parsing error in market analysis:")
+                      print(f"   Error: {e}")
+                      print(f"   Attempted to parse: {json_text[:500] if 'json_text' in locals() else 'No JSON extracted'}")
+                      raise
+                  except anthropic.APIError as e:
+                      print(f"❌ Anthropic API error in market analysis:")
+                      print(f"   Error type: {type(e).__name__}")
+                      print(f"   Error message: {str(e)}")
+                      raise
+                  except Exception as e:
+                      print(f"❌ Unexpected error in market analysis:")
+                      print(f"   Error type: {type(e).__name__}")
+                      print(f"   Error message: {str(e)}")
+                      print(f"   Traceback: {traceback.format_exc()}")
+                      raise
               
               def analyze_organization(self):
                   """Claude analyzes the entire organization state with market intelligence"""
                   repos = list(self.org.get_repos())
+                  repo_names = [r.name for r in repos]
+                  
+                  print(f"📊 Analyzing organization with {len(repos)} repositories")
+                  print(f"   Repositories: {repo_names}")
+                  print(f"   Market trends: {len(self.market_intel.get('github_trending', []))} GitHub, {len(self.market_intel.get('product_hunt', []))} Product Hunt")
                   
                   analysis_prompt = f"""You are the autonomous AI brain controlling CodeWebMobile-AI.
                   
-                  Current repositories: {[r.name for r in repos]}
+                  Current repositories: {repo_names}
                   Market trends: {self.market_intel}
                   
                   Analyze and decide what to do next. Focus on:
@@ -167,15 +214,63 @@ jobs:
                   4. Security improvements
                   5. Laravel + React TypeScript stack
                   
-                  Return concise JSON action plan."""
+                  Return ONLY valid JSON with this structure:
+                  {{
+                      "new_projects": [
+                          {{
+                              "name": "project-name",
+                              "type": "webapp",
+                              "description": "description",
+                              "tech_stack": ["Laravel", "React", "TypeScript"]
+                          }}
+                      ],
+                      "existing_projects": [
+                          {{"repo": "repo-name", "actions": ["add_feature", "security_audit"]}}
+                      ],
+                      "immediate_tasks": []
+                  }}"""
                   
-                  response = self.claude.messages.create(
-                      model='claude-3-opus-20240229',
-                      max_tokens=4000,
-                      messages=[{'role': 'user', 'content': analysis_prompt}]
-                  )
-                  
-                  return json.loads(response.content[0].text)
+                  try:
+                      print("🤖 Calling Claude API for organization analysis...")
+                      response = self.claude.messages.create(
+                          model='claude-3-opus-20240229',
+                          max_tokens=4000,
+                          messages=[{'role': 'user', 'content': analysis_prompt}]
+                      )
+                      
+                      raw_response = response.content[0].text
+                      print(f"📝 Raw Claude response length: {len(raw_response)} characters")
+                      print(f"📝 Response preview: {raw_response[:200]}...")
+                      
+                      json_text = self.extract_json_from_response(raw_response)
+                      print(f"🔍 Extracted JSON length: {len(json_text)} characters")
+                      
+                      result = json.loads(json_text)
+                      print(f"✅ Organization analysis successful")
+                      print(f"   New projects suggested: {len(result.get('new_projects', []))}")
+                      print(f"   Existing projects to update: {len(result.get('existing_projects', []))}")
+                      return result
+                      
+                  except json.JSONDecodeError as e:
+                      print(f"❌ JSON parsing error in organization analysis:")
+                      print(f"   Error: {e}")
+                      print(f"   Attempted to parse: {json_text[:1000] if 'json_text' in locals() else 'No JSON extracted'}")
+                      if 'raw_response' in locals():
+                          print(f"   Full response: {raw_response}")
+                      raise
+                  except anthropic.APIError as e:
+                      print(f"❌ Anthropic API error in organization analysis:")
+                      print(f"   Error type: {type(e).__name__}")
+                      print(f"   Error message: {str(e)}")
+                      print(f"   API Key present: {'ANTHROPIC_API_KEY' in os.environ}")
+                      print(f"   API Key length: {len(os.environ.get('ANTHROPIC_API_KEY', ''))} characters")
+                      raise
+                  except Exception as e:
+                      print(f"❌ Unexpected error in organization analysis:")
+                      print(f"   Error type: {type(e).__name__}")
+                      print(f"   Error message: {str(e)}")
+                      print(f"   Traceback: {traceback.format_exc()}")
+                      raise
           EOF
           
       - name: Create Claude Brain Script Part 2
@@ -332,6 +427,7 @@ jobs:
           cat > claude_brain_main.py << 'EOF'
           from claude_brain_projects import ProjectCreator
           import json
+          import sys
           
           class MasterExecutor(ProjectCreator):
               def work_on_existing_projects(self, tasks):
@@ -348,7 +444,8 @@ jobs:
                               self.add_feature_issue(repo)
                               
                       except Exception as e:
-                          print(f"Error with {task['repo']}: {e}")
+                          print(f"❌ Error working on {task['repo']}: {e}")
+                          print(f"   Task details: {task}")
               
               def perform_security_audit(self, repo):
                   """Create security audit issue"""
@@ -372,39 +469,95 @@ jobs:
                   """Main execution loop"""
                   
                   print("🧠 Claude Master Brain activated!")
-                  print(f"📊 Market data: {len(self.market_intel.get('github_trending', []))} trends")
+                  print(f"📊 Market data loaded: {len(self.market_intel.get('github_trending', []))} GitHub trends, {len(self.market_intel.get('product_hunt', []))} Product Hunt trends")
                   
-                  # Get action plan
-                  plan = self.analyze_organization()
-                  
-                  # Create one quality project
-                  new_projects = plan.get('new_projects', [])
-                  if new_projects:
-                      try:
-                          self.create_complete_project(new_projects[0])
-                      except Exception as e:
-                          print(f"Project creation error: {e}")
-                  
-                  # Work on existing projects
-                  self.work_on_existing_projects(plan.get('existing_projects', []))
-                  
-                  # Save execution summary
-                  with open('execution_summary.json', 'w') as f:
-                      json.dump({
+                  try:
+                      # Get action plan
+                      print("📋 Analyzing organization...")
+                      plan = self.analyze_organization()
+                      
+                      # Create one quality project
+                      new_projects = plan.get('new_projects', [])
+                      if new_projects:
+                          print(f"🏗️ Found {len(new_projects)} new project suggestions")
+                          try:
+                              project = new_projects[0]
+                              print(f"📦 Attempting to create project: {project.get('name', 'Unknown')}")
+                              result = self.create_complete_project(project)
+                              if result:
+                                  print(f"✅ Successfully created project: {result.name}")
+                              else:
+                                  print(f"⚠️ Project creation returned None (likely due to low market score)")
+                          except Exception as e:
+                              print(f"❌ Project creation failed:")
+                              print(f"   Error type: {type(e).__name__}")
+                              print(f"   Error message: {str(e)}")
+                              import traceback
+                              print(f"   Traceback: {traceback.format_exc()}")
+                      else:
+                          print("📭 No new projects suggested")
+                      
+                      # Work on existing projects
+                      existing_projects = plan.get('existing_projects', [])
+                      if existing_projects:
+                          print(f"🔧 Working on {len(existing_projects)} existing projects")
+                          self.work_on_existing_projects(existing_projects)
+                      else:
+                          print("📭 No existing project updates suggested")
+                      
+                      # Save execution summary
+                      summary = {
                           "timestamp": datetime.now().isoformat(),
                           "projects_analyzed": len(plan.get('existing_projects', [])),
-                          "new_project_attempted": len(new_projects) > 0
-                      }, f)
+                          "new_project_attempted": len(new_projects) > 0,
+                          "status": "success"
+                      }
+                      
+                  except Exception as e:
+                      print(f"❌ Critical error in continuous improvement cycle:")
+                      print(f"   Error type: {type(e).__name__}")
+                      print(f"   Error message: {str(e)}")
+                      import traceback
+                      print(f"   Full traceback:\n{traceback.format_exc()}")
+                      
+                      # Save error summary
+                      summary = {
+                          "timestamp": datetime.now().isoformat(),
+                          "projects_analyzed": 0,
+                          "new_project_attempted": False,
+                          "status": "error",
+                          "error": str(e),
+                          "error_type": type(e).__name__
+                      }
+                      
+                      # Exit with error code
+                      with open('execution_summary.json', 'w') as f:
+                          json.dump(summary, f, indent=2)
+                      sys.exit(1)
+                  
+                  # Save successful execution summary
+                  with open('execution_summary.json', 'w') as f:
+                      json.dump(summary, f, indent=2)
                   
                   print("✅ Cycle complete!")
           
           if __name__ == "__main__":
               from datetime import datetime
-              executor = MasterExecutor()
-              executor.run_continuous_improvement()
+              try:
+                  executor = MasterExecutor()
+                  executor.run_continuous_improvement()
+              except Exception as e:
+                  print(f"❌ Fatal error in main execution:")
+                  print(f"   Error type: {type(e).__name__}")
+                  print(f"   Error message: {str(e)}")
+                  import traceback
+                  print(f"   Full traceback:\n{traceback.format_exc()}")
+                  sys.exit(1)
           EOF
           
       - name: Execute Claude Master Brain
+        id: claude_brain
+        continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}
@@ -416,6 +569,7 @@ jobs:
         if: always()
         env:
           MARKET_INTEL: ${{ steps.market_intel.outputs.market_data }}
+          CLAUDE_BRAIN_OUTCOME: ${{ steps.claude_brain.outcome }}
         run: |
           cat > performance_report.py << 'EOF'
           import json
@@ -438,6 +592,9 @@ jobs:
           except:
               pass
           
+          # Check Claude Brain execution status
+          claude_brain_status = os.environ.get('CLAUDE_BRAIN_OUTCOME', 'unknown')
+          
           report = {
               "timestamp": datetime.now().isoformat(),
               "cycle": "2-hour quality cycle",
@@ -450,6 +607,7 @@ jobs:
                   "analysis_timestamp": datetime.now().isoformat()
               },
               "execution_summary": execution_summary,
+              "claude_brain_status": claude_brain_status,
               "optimizations": [
                   "Quality over quantity",
                   "Market validation before creation",
@@ -471,6 +629,7 @@ jobs:
           with open('performance_summary.md', 'w') as f:
               f.write(f"# Claude Master Brain Performance Report\n\n")
               f.write(f"**Generated**: {report['timestamp']}\n\n")
+              f.write(f"**Status**: {claude_brain_status.upper()}\n\n")
               f.write(f"## 📊 Market Intelligence\n\n")
               f.write(f"- **GitHub Trending Projects**: {report['market_intelligence']['github_trending_count']}\n")
               f.write(f"- **Product Hunt Trends**: {report['market_intelligence']['product_hunt_count']}\n\n")
@@ -480,6 +639,16 @@ jobs:
               f.write(f"\n### Product Hunt Highlights\n")
               for product in market_data.get('product_hunt', [])[:5]:
                   f.write(f"- {product}\n")
+              f.write(f"\n## 🤖 Execution Status\n\n")
+              if execution_summary:
+                  f.write(f"- **Status**: {execution_summary.get('status', 'unknown')}\n")
+                  f.write(f"- **Projects Analyzed**: {execution_summary.get('projects_analyzed', 0)}\n")
+                  f.write(f"- **New Project Attempted**: {execution_summary.get('new_project_attempted', False)}\n")
+                  if 'error' in execution_summary:
+                      f.write(f"- **Error Type**: {execution_summary.get('error_type', 'unknown')}\n")
+                      f.write(f"- **Error Message**: {execution_summary.get('error', 'unknown')}\n")
+              else:
+                  f.write(f"No execution summary available\n")
               f.write(f"\n## 🎯 Execution Focus\n\n")
               f.write(f"{report['focus']}\n\n")
               f.write(f"## ⚡ Optimizations\n\n")
@@ -489,6 +658,7 @@ jobs:
           print("📊 Comprehensive performance report generated")
           print(f"📈 Tracked {len(market_data.get('github_trending', []))} GitHub trends")
           print(f"🚀 Tracked {len(market_data.get('product_hunt', []))} Product Hunt trends")
+          print(f"🤖 Claude Brain Status: {claude_brain_status}")
           EOF
           
           python performance_report.py
