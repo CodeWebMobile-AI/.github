@@ -34,7 +34,7 @@ jobs:
         run: |
           # Python dependencies
           pip install anthropic pygithub requests pyyaml beautifulsoup4 feedparser
-          pip install safety bandit semgrep truffleHog3
+          pip install safety bandit semgrep trufflehog3
           
           # Node dependencies for security scanning
           npm install -g @npmcli/arborist snyk
@@ -43,37 +43,62 @@ jobs:
         id: market_intel
         run: |
           python3 << 'EOF'
-          import requests
-          from bs4 import BeautifulSoup
-          import feedparser
+          import os
+          import sys
           import json
           
-          # Scrape GitHub Trending
-          trending_url = "https://github.com/trending"
-          response = requests.get(trending_url)
-          soup = BeautifulSoup(response.text, 'html.parser')
+          try:
+              import requests
+              from bs4 import BeautifulSoup
+              import feedparser
+          except ImportError as e:
+              print(f"Import error: {e}")
+              # Create minimal market data if imports fail
+              market_data = {
+                  "github_trending": ["Unable to fetch - missing dependencies"],
+                  "product_hunt": ["Unable to fetch - missing dependencies"]
+              }
+          else:
+              try:
+                  # Scrape GitHub Trending
+                  trending_url = "https://github.com/trending"
+                  response = requests.get(trending_url, timeout=10)
+                  soup = BeautifulSoup(response.text, 'html.parser')
+                  
+                  trending_repos = []
+                  for repo in soup.select('.Box-row')[:10]:
+                      name = repo.select_one('h2 a')
+                      if name:
+                          trending_repos.append(name.text.strip())
+                  
+                  # Product Hunt RSS
+                  ph_feed = feedparser.parse('https://www.producthunt.com/feed')
+                  trending_products = [entry.title for entry in ph_feed.entries[:5]]
+                  
+                  market_data = {
+                      "github_trending": trending_repos if trending_repos else ["No trends found"],
+                      "product_hunt": trending_products if trending_products else ["No products found"]
+                  }
+              except Exception as e:
+                  print(f"Error fetching market data: {e}")
+                  market_data = {
+                      "github_trending": ["Error fetching trends"],
+                      "product_hunt": ["Error fetching products"]
+                  }
           
-          trending_repos = []
-          for repo in soup.select('.Box-row')[:10]:
-              name = repo.select_one('h2 a')
-              if name:
-                  trending_repos.append(name.text.strip())
-          
-          # Product Hunt RSS
-          ph_feed = feedparser.parse('https://www.producthunt.com/feed')
-          trending_products = [entry.title for entry in ph_feed.entries[:5]]
-          
-          market_data = {
-              "github_trending": trending_repos,
-              "product_hunt": trending_products
-          }
-          
+          # Save to file
           with open('market_intelligence.json', 'w') as f:
               json.dump(market_data, f)
           
-          # Write to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"market_data={json.dumps(market_data)}\n")
+          # Write to GITHUB_OUTPUT (with fallback for older runners)
+          if 'GITHUB_OUTPUT' in os.environ:
+              with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+                  f.write(f"market_data={json.dumps(market_data)}\n")
+          else:
+              # Fallback for older runners
+              print(f"::set-output name=market_data::{json.dumps(market_data)}")
+          
+          print(f"Market intelligence gathered: {len(market_data.get('github_trending', []))} GitHub trends, {len(market_data.get('product_hunt', []))} Product Hunt items")
           EOF
           
       - name: Security Baseline Check
