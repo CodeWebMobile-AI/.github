@@ -30,50 +30,53 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python -c "
-import anthropic
-from github import Github
-import json
-
-print('🤖 Claude AI activating for CodeWebMobile-AI...')
-
-claude = anthropic.Anthropic()
-g = Github('${{ secrets.GITHUB_TOKEN }}')
-org = g.get_organization('CodeWebMobile-AI')
-
-# Get current state
-repos = list(org.get_repos())
-print(f'Current repos: {[r.name for r in repos]}')
-
-# Ask Claude what to do
-prompt = '''You are the AI controller of the CodeWebMobile-AI GitHub organization.
-Current repositories: ''' + str([r.name for r in repos]) + '''
-
-Decide what to create or work on. Respond with JSON:
-{
-  \"action\": \"create_repo\",
-  \"name\": \"example-project\",
-  \"description\": \"What this project does\"
-}
-'''
-
-response = claude.messages.create(
-    model='claude-3-opus-20240229',
-    max_tokens=1000,
-    messages=[{'role': 'user', 'content': prompt}]
-)
-
-# Parse Claude's decision
-decision = json.loads(response.content[0].text)
-print(f'Claude decided: {decision}')
-
-if decision['action'] == 'create_repo':
-    # Create new repository
-    new_repo = org.create_repo(
-        name=decision['name'],
-        description=decision['description'],
-        auto_init=True,
-        public=True
-    )
-    print(f'✅ Created: {new_repo.html_url}')
-"
+          cat > claude_control.py << 'EOF'
+          import anthropic
+          from github import Github
+          import json
+          import os
+          
+          print('🤖 Claude AI activating for CodeWebMobile-AI...')
+          
+          claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+          g = Github(os.environ['GITHUB_TOKEN'])
+          org = g.get_organization('CodeWebMobile-AI')
+          
+          # Get current state
+          repos = list(org.get_repos())
+          print(f'Current repos: {[r.name for r in repos]}')
+          
+          # Ask Claude what to do
+          prompt = f"""You are the AI controller of the CodeWebMobile-AI GitHub organization.
+          Current repositories: {[r.name for r in repos]}
+          
+          Decide what to create or work on. Respond with JSON:
+          {{
+            "action": "create_repo",
+            "name": "example-project",
+            "description": "What this project does"
+          }}
+          """
+          
+          response = claude.messages.create(
+              model='claude-3-opus-20240229',
+              max_tokens=1000,
+              messages=[{'role': 'user', 'content': prompt}]
+          )
+          
+          # Parse Claude's decision
+          decision = json.loads(response.content[0].text)
+          print(f'Claude decided: {decision}')
+          
+          if decision['action'] == 'create_repo':
+              # Create new repository
+              new_repo = org.create_repo(
+                  name=decision['name'],
+                  description=decision['description'],
+                  auto_init=True,
+                  public=True
+              )
+              print(f'✅ Created: {new_repo.html_url}')
+          EOF
+          
+          python claude_control.py
