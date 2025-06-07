@@ -1,0 +1,380 @@
+name: Claude Master Autonomous System
+on:
+  schedule:
+    - cron: '*/15 * * * *'  # Every 15 minutes - aggressive automation
+  workflow_dispatch:
+  repository_dispatch:
+    types: [claude-command]
+
+jobs:
+  claude-orchestrator:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
+      packages: write
+      
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+          
+      - name: Install Dependencies
+        run: |
+          pip install anthropic pygithub requests pyyaml
+          
+      - name: Claude Master Brain
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}
+        run: |
+          cat > claude_master_brain.py << 'EOF'
+          import anthropic
+          from github import Github
+          import json
+          import os
+          import yaml
+          import random
+          from datetime import datetime
+          
+          class ClaudeMasterBrain:
+              def __init__(self):
+                  self.claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+                  self.g = Github(os.environ['GITHUB_TOKEN'])
+                  self.org = self.g.get_organization('CodeWebMobile-AI')
+                  self.master_plan = []
+                  
+              def analyze_organization(self):
+                  """Claude analyzes the entire organization state"""
+                  repos = list(self.org.get_repos())
+                  
+                  analysis_prompt = f"""You are the autonomous AI brain controlling CodeWebMobile-AI.
+                  
+                  Current repositories: {[r.name for r in repos]}
+                  
+                  Analyze the organization and decide what to do next. Consider:
+                  1. What new projects should be created?
+                  2. Which existing projects need work?
+                  3. What features should be added?
+                  4. What issues need to be created/solved?
+                  5. What documentation needs updating?
+                  
+                  Return a comprehensive action plan as JSON:
+                  {{
+                      "new_projects": [
+                          {{"name": "project-name", "type": "webapp|api|tool|library", "description": "...", "tech_stack": ["..."]}}
+                      ],
+                      "existing_projects": [
+                          {{"repo": "repo-name", "actions": ["add_feature", "fix_bugs", "update_docs", "add_tests"]}}
+                      ],
+                      "immediate_tasks": [
+                          {{"type": "create_issue|create_pr|update_file", "repo": "...", "details": {{}}}}
+                      ]
+                  }}"""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=4000,
+                      messages=[{'role': 'user', 'content': analysis_prompt}]
+                  )
+                  
+                  return json.loads(response.content[0].text)
+              
+              def create_complete_project(self, project_spec):
+                  """Create a complete, working project from scratch"""
+                  print(f"🚀 Creating project: {project_spec['name']}")
+                  
+                  # Create repository
+                  repo = self.org.create_repo(
+                      name=project_spec['name'],
+                      description=f"🤖 {project_spec['description']}",
+                      private=False,
+                      has_issues=True,
+                      has_projects=True,
+                      has_wiki=True
+                  )
+                  
+                  # Generate complete project structure based on type
+                  if project_spec['type'] == 'webapp':
+                      self.create_webapp(repo, project_spec)
+                  elif project_spec['type'] == 'api':
+                      self.create_api(repo, project_spec)
+                  elif project_spec['type'] == 'tool':
+                      self.create_cli_tool(repo, project_spec)
+                  elif project_spec['type'] == 'library':
+                      self.create_library(repo, project_spec)
+                  
+                  # Setup CI/CD
+                  self.setup_cicd(repo, project_spec)
+                  
+                  # Create initial issues for Claude to work on
+                  self.create_project_roadmap(repo, project_spec)
+                  
+                  # Enable Claude integration
+                  self.add_claude_workflow(repo)
+                  
+                  return repo
+              
+              def create_webapp(self, repo, spec):
+                  """Create a complete web application"""
+                  
+                  # Decide on framework
+                  framework_prompt = f"""Create a complete web application for: {spec['description']}
+                  Tech stack preference: {spec.get('tech_stack', [])}
+                  
+                  Generate the COMPLETE file structure and code for a working web app.
+                  Return as JSON with file paths and contents.
+                  Include: HTML, CSS, JavaScript, backend code, package.json, etc.
+                  Make it production-ready with proper structure."""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=4000,
+                      messages=[{'role': 'user', 'content': framework_prompt}]
+                  )
+                  
+                  files = json.loads(response.content[0].text)
+                  
+                  # Create all files
+                  for file_info in files.get('files', []):
+                      repo.create_file(
+                          path=file_info['path'],
+                          message=f"🤖 Create {file_info['path']}",
+                          content=file_info['content'],
+                          branch="main"
+                      )
+                      print(f"📝 Created {file_info['path']}")
+              
+              def create_api(self, repo, spec):
+                  """Create a complete API service"""
+                  
+                  api_prompt = f"""Create a complete REST API for: {spec['description']}
+                  
+                  Include:
+                  - Server setup (Express/FastAPI/etc)
+                  - Route handlers
+                  - Database models
+                  - Authentication
+                  - Documentation
+                  - Tests
+                  - Docker configuration
+                  
+                  Return complete file structure and code as JSON."""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=4000,
+                      messages=[{'role': 'user', 'content': api_prompt}]
+                  )
+                  
+                  files = json.loads(response.content[0].text)
+                  
+                  for file_info in files.get('files', []):
+                      repo.create_file(
+                          path=file_info['path'],
+                          message=f"🤖 Create {file_info['path']}",
+                          content=file_info['content'],
+                          branch="main"
+                      )
+              
+              def setup_cicd(self, repo, spec):
+                  """Setup complete CI/CD pipeline"""
+                  
+                  # Create GitHub Actions workflow
+                  cicd_workflow = f"""name: CI/CD Pipeline
+          on:
+            push:
+              branches: [main, develop]
+            pull_request:
+              branches: [main]
+          
+          jobs:
+            test:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Run Tests
+                  run: |
+                    # Claude will add appropriate test commands
+                    echo "Tests will be added by Claude"
+            
+            build:
+              runs-on: ubuntu-latest
+              needs: test
+              steps:
+                - uses: actions/checkout@v4
+                - name: Build Application
+                  run: |
+                    # Claude will add build commands
+                    echo "Build process will be added by Claude"
+            
+            deploy:
+              runs-on: ubuntu-latest
+              needs: build
+              if: github.ref == 'refs/heads/main'
+              steps:
+                - name: Deploy
+                  run: |
+                    echo "Deployment will be configured by Claude"
+          """
+                  
+                  repo.create_file(
+                      path=".github/workflows/cicd.yml",
+                      message="🤖 Setup CI/CD pipeline",
+                      content=cicd_workflow,
+                      branch="main"
+                  )
+              
+              def add_claude_workflow(self, repo):
+                  """Add Claude integration to the repository"""
+                  
+                  claude_workflow = """name: Claude Integration
+          on:
+            issue_comment:
+              types: [created]
+            issues:
+              types: [opened]
+            pull_request:
+              types: [opened]
+          
+          jobs:
+            claude-helper:
+              if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude')
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                - name: Claude Responds
+                  uses: anthropics/claude-code-action@beta
+                  with:
+                    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          """
+                  
+                  repo.create_file(
+                      path=".github/workflows/claude.yml",
+                      message="🤖 Enable Claude integration",
+                      content=claude_workflow,
+                      branch="main"
+                  )
+              
+              def create_project_roadmap(self, repo, spec):
+                  """Create issues for Claude to work on"""
+                  
+                  roadmap_prompt = f"""Create a project roadmap for {spec['name']}: {spec['description']}
+                  
+                  Generate 5-10 specific issues/tasks that need to be completed.
+                  Return as JSON array of issue titles and descriptions."""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=2000,
+                      messages=[{'role': 'user', 'content': roadmap_prompt}]
+                  )
+                  
+                  issues = json.loads(response.content[0].text)
+                  
+                  for issue in issues.get('issues', []):
+                      repo.create_issue(
+                          title=issue['title'],
+                          body=f"{issue['description']}\n\n@claude please implement this",
+                          labels=['enhancement', 'claude-task']
+                      )
+              
+              def work_on_existing_projects(self, tasks):
+                  """Work on existing repositories"""
+                  
+                  for task in tasks:
+                      repo = self.org.get_repo(task['repo'])
+                      
+                      if 'add_feature' in task['actions']:
+                          self.add_features_to_repo(repo)
+                      
+                      if 'fix_bugs' in task['actions']:
+                          self.fix_repository_issues(repo)
+                      
+                      if 'update_docs' in task['actions']:
+                          self.update_documentation(repo)
+                      
+                      if 'add_tests' in task['actions']:
+                          self.add_tests_to_repo(repo)
+              
+              def add_features_to_repo(self, repo):
+                  """Add new features to existing repository"""
+                  
+                  # Get repository content
+                  contents = repo.get_contents("")
+                  
+                  feature_prompt = f"""Repository: {repo.name}
+                  Description: {repo.description}
+                  Current files: {[c.path for c in contents if c.type == 'file']}
+                  
+                  Suggest and implement a new feature for this project.
+                  Return JSON with file modifications/additions."""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=4000,
+                      messages=[{'role': 'user', 'content': feature_prompt}]
+                  )
+                  
+                  # Implement the feature
+                  changes = json.loads(response.content[0].text)
+                  
+                  # Create a feature branch and PR
+                  branch_name = f"feature/claude-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                  
+                  # Create issue first
+                  issue = repo.create_issue(
+                      title=f"✨ {changes.get('feature_name', 'New Feature')}",
+                      body=f"{changes.get('description', 'Feature added by Claude')}\n\n@claude implement this feature"
+                  )
+              
+              def run_continuous_improvement(self):
+                  """Main loop for continuous improvement"""
+                  
+                  print("🧠 Claude Master Brain activated!")
+                  
+                  # Analyze organization
+                  plan = self.analyze_organization()
+                  
+                  # Create new projects
+                  for project in plan.get('new_projects', [])[:2]:  # Limit to 2 per run
+                      try:
+                          self.create_complete_project(project)
+                      except Exception as e:
+                          print(f"Error creating project: {e}")
+                  
+                  # Work on existing projects
+                  self.work_on_existing_projects(plan.get('existing_projects', []))
+                  
+                  # Execute immediate tasks
+                  for task in plan.get('immediate_tasks', []):
+                      self.execute_task(task)
+                  
+                  print("✅ Autonomous cycle complete!")
+              
+              def execute_task(self, task):
+                  """Execute a specific task"""
+                  
+                  if task['type'] == 'create_issue':
+                      repo = self.org.get_repo(task['repo'])
+                      repo.create_issue(
+                          title=task['details']['title'],
+                          body=task['details']['body'] + "\n\n@claude please help with this"
+                      )
+                  
+                  elif task['type'] == 'update_file':
+                      repo = self.org.get_repo(task['repo'])
+                      # Update file logic here
+                      pass
+          
+          if __name__ == "__main__":
+              brain = ClaudeMasterBrain()
+              brain.run_continuous_improvement()
+          EOF
+          
+          python claude_master_brain.py
