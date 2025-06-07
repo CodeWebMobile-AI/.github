@@ -1,4 +1,10 @@
-name: Claude Master Autonomous System
+with open('market_intelligence.json', 'w') as f:
+              json.dump(market_data, f)
+          
+          # Write to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"market_data={json.dumps(market_data)}\n")
+          EOFname: Claude Master Autonomous System
 on:
   schedule:
     - cron: '0 */2 * * *'  # Every 2 hours - optimized for quality over quantity
@@ -492,7 +498,7 @@ jobs:
           
       - name: Upload Reports
         if: always()
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: claude-brain-reports
           path: |
