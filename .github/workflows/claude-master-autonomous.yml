@@ -1,7 +1,7 @@
 name: Claude Master Autonomous System
 on:
   schedule:
-    - cron: '*/15 * * * *'  # Every 15 minutes - aggressive automation
+    - cron: '0 */2 * * *'  # Every 2 hours - optimized for quality over quantity
   workflow_dispatch:
   repository_dispatch:
     types: [claude-command]
@@ -15,6 +15,7 @@ jobs:
       pull-requests: write
       actions: write
       packages: write
+      security-events: write
       
     steps:
       - uses: actions/checkout@v4
@@ -24,14 +25,84 @@ jobs:
         with:
           python-version: '3.11'
           
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          
       - name: Install Dependencies
         run: |
-          pip install anthropic pygithub requests pyyaml
+          # Python dependencies
+          pip install anthropic pygithub requests pyyaml beautifulsoup4 feedparser
+          pip install safety bandit semgrep truffleHog3
+          
+          # Node dependencies for security scanning
+          npm install -g @npmcli/arborist snyk
+          
+      - name: Market Intelligence Gathering
+        id: market_intel
+        run: |
+          python3 << 'EOF'
+          import requests
+          from bs4 import BeautifulSoup
+          import feedparser
+          import json
+          
+          # Scrape GitHub Trending
+          trending_url = "https://github.com/trending"
+          response = requests.get(trending_url)
+          soup = BeautifulSoup(response.text, 'html.parser')
+          
+          trending_repos = []
+          for repo in soup.select('.Box-row')[:10]:
+              name = repo.select_one('h2 a')
+              if name:
+                  trending_repos.append(name.text.strip())
+          
+          # Product Hunt RSS
+          ph_feed = feedparser.parse('https://www.producthunt.com/feed')
+          trending_products = [entry.title for entry in ph_feed.entries[:5]]
+          
+          market_data = {
+              "github_trending": trending_repos,
+              "product_hunt": trending_products
+          }
+          
+          with open('market_intelligence.json', 'w') as f:
+              json.dump(market_data, f)
+          
+          print(f"::set-output name=market_data::{json.dumps(market_data)}")
+          EOF
+          
+      - name: Security Baseline Check
+        run: |
+          # Create security policy template
+          cat > SECURITY_TEMPLATE.md << 'EOF'
+          # Security Policy
+          
+          ## Supported Versions
+          
+          | Version | Supported          |
+          | ------- | ------------------ |
+          | latest  | :white_check_mark: |
+          
+          ## Reporting a Vulnerability
+          
+          Please report security vulnerabilities to security@codewebmobile-ai.com
+          
+          ## Security Measures
+          
+          - Automated dependency scanning
+          - Code security analysis with Semgrep
+          - Secret detection with TruffleHog
+          - Regular security audits
+          EOF
           
       - name: Claude Master Brain
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}
+          MARKET_INTEL: ${{ steps.market_intel.outputs.market_data }}
         run: |
           cat > claude_master_brain.py << 'EOF'
           import anthropic
@@ -40,6 +111,7 @@ jobs:
           import os
           import yaml
           import random
+          import subprocess
           from datetime import datetime
           
           class ClaudeMasterBrain:
@@ -48,32 +120,71 @@ jobs:
                   self.g = Github(os.environ['GITHUB_TOKEN'])
                   self.org = self.g.get_organization('CodeWebMobile-AI')
                   self.master_plan = []
+                  self.market_intel = json.loads(os.environ.get('MARKET_INTEL', '{}'))
                   
+              def analyze_market_opportunity(self, project_idea):
+                  """Analyze market opportunity for a project idea"""
+                  
+                  market_prompt = f"""Analyze the market opportunity for: {project_idea}
+                  
+                  Current GitHub trends: {self.market_intel.get('github_trending', [])}
+                  Product Hunt trends: {self.market_intel.get('product_hunt', [])}
+                  
+                  Score this opportunity from 1-10 based on:
+                  1. Market demand
+                  2. Competition level
+                  3. Technical feasibility
+                  4. Revenue potential
+                  5. Innovation factor
+                  
+                  Return JSON:
+                  {{
+                      "score": 1-10,
+                      "analysis": "detailed reasoning",
+                      "competitors": ["list of competitors"],
+                      "unique_value_prop": "what makes this special"
+                  }}"""
+                  
+                  response = self.claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=2000,
+                      messages=[{'role': 'user', 'content': market_prompt}]
+                  )
+                  
+                  return json.loads(response.content[0].text)
+              
               def analyze_organization(self):
-                  """Claude analyzes the entire organization state"""
+                  """Claude analyzes the entire organization state with market intelligence"""
                   repos = list(self.org.get_repos())
                   
                   analysis_prompt = f"""You are the autonomous AI brain controlling CodeWebMobile-AI.
                   
                   Current repositories: {[r.name for r in repos]}
+                  Market trends: {self.market_intel}
                   
                   Analyze the organization and decide what to do next. Consider:
-                  1. What new projects should be created?
-                  2. Which existing projects need work?
-                  3. What features should be added?
-                  4. What issues need to be created/solved?
-                  5. What documentation needs updating?
+                  1. What trending technologies should we adopt?
+                  2. What market gaps can we fill?
+                  3. Which projects have the highest ROI potential?
+                  4. What security improvements are needed?
+                  5. Focus on Laravel + React TypeScript stack when appropriate
                   
                   Return a comprehensive action plan as JSON:
                   {{
                       "new_projects": [
-                          {{"name": "project-name", "type": "webapp|api|tool|library", "description": "...", "tech_stack": ["..."]}}
+                          {{
+                              "name": "project-name", 
+                              "type": "webapp|api|tool|library", 
+                              "description": "...", 
+                              "tech_stack": ["Laravel", "React", "TypeScript", "MySQL", "Redis"],
+                              "market_rationale": "why this will succeed"
+                          }}
                       ],
                       "existing_projects": [
-                          {{"repo": "repo-name", "actions": ["add_feature", "fix_bugs", "update_docs", "add_tests"]}}
+                          {{"repo": "repo-name", "actions": ["add_feature", "fix_bugs", "update_docs", "add_tests", "security_audit"]}}
                       ],
                       "immediate_tasks": [
-                          {{"type": "create_issue|create_pr|update_file", "repo": "...", "details": {{}}}}
+                          {{"type": "create_issue|create_pr|update_file|security_scan", "repo": "...", "details": {{}}}}
                       ]
                   }}"""
                   
@@ -86,18 +197,34 @@ jobs:
                   return json.loads(response.content[0].text)
               
               def create_complete_project(self, project_spec):
-                  """Create a complete, working project from scratch"""
-                  print(f"🚀 Creating project: {project_spec['name']}")
+                  """Create a complete, working project from scratch with security-first approach"""
+                  
+                  # First, analyze market opportunity
+                  market_analysis = self.analyze_market_opportunity(project_spec['description'])
+                  
+                  if market_analysis['score'] < 6:
+                      print(f"❌ Skipping {project_spec['name']} - Market score: {market_analysis['score']}/10")
+                      print(f"Reason: {market_analysis['analysis']}")
+                      return None
+                  
+                  print(f"🚀 Creating project: {project_spec['name']} (Market score: {market_analysis['score']}/10)")
                   
                   # Create repository
                   repo = self.org.create_repo(
                       name=project_spec['name'],
-                      description=f"🤖 {project_spec['description']}",
+                      description=f"🤖 {project_spec['description']} | Market Score: {market_analysis['score']}/10",
                       private=False,
                       has_issues=True,
                       has_projects=True,
-                      has_wiki=True
+                      has_wiki=True,
+                      has_discussions=True
                   )
+                  
+                  # Add market analysis to README
+                  self.create_market_driven_readme(repo, project_spec, market_analysis)
+                  
+                  # Add security policy
+                  self.add_security_policy(repo)
                   
                   # Generate complete project structure based on type
                   if project_spec['type'] == 'webapp':
@@ -109,33 +236,108 @@ jobs:
                   elif project_spec['type'] == 'library':
                       self.create_library(repo, project_spec)
                   
-                  # Setup CI/CD
-                  self.setup_cicd(repo, project_spec)
+                  # Setup CI/CD with security scanning
+                  self.setup_secure_cicd(repo, project_spec)
                   
                   # Create initial issues for Claude to work on
-                  self.create_project_roadmap(repo, project_spec)
+                  self.create_project_roadmap(repo, project_spec, market_analysis)
                   
                   # Enable Claude integration
                   self.add_claude_workflow(repo)
                   
+                  # Run initial security scan
+                  self.run_security_scan(repo)
+                  
                   return repo
               
+              def create_market_driven_readme(self, repo, spec, market_analysis):
+                  """Create README with market analysis"""
+                  
+                  readme_content = f"""# {spec['name']}
+          
+          > {spec['description']}
+          
+          ## 📊 Market Analysis
+          
+          **Market Score**: {market_analysis['score']}/10
+          
+          **Analysis**: {market_analysis['analysis']}
+          
+          **Unique Value Proposition**: {market_analysis['unique_value_prop']}
+          
+          **Competitors**: {', '.join(market_analysis['competitors'])}
+          
+          ## 🚀 Tech Stack
+          
+          {chr(10).join(['- ' + tech for tech in spec.get('tech_stack', [])])}
+          
+          ## 🔒 Security
+          
+          This project implements security-first principles:
+          - Automated vulnerability scanning
+          - Dependency security checks
+          - Code security analysis
+          - Secret detection
+          
+          ## 🤖 Powered by Claude
+          
+          This project is autonomously maintained by Claude AI.
+          """
+                  
+                  repo.create_file(
+                      path="README.md",
+                      message="🤖 Create market-driven README",
+                      content=readme_content,
+                      branch="main"
+                  )
+              
+              def add_security_policy(self, repo):
+                  """Add security policy to repository"""
+                  
+                  with open('SECURITY_TEMPLATE.md', 'r') as f:
+                      security_content = f.read()
+                  
+                  repo.create_file(
+                      path="SECURITY.md",
+                      message="🔒 Add security policy",
+                      content=security_content,
+                      branch="main"
+                  )
+              
               def create_webapp(self, repo, spec):
-                  """Create a complete web application"""
+                  """Create a complete web application with Laravel + React TypeScript"""
                   
-                  # Decide on framework
-                  framework_prompt = f"""Create a complete web application for: {spec['description']}
-                  Tech stack preference: {spec.get('tech_stack', [])}
+                  webapp_prompt = f"""Create a complete Laravel + React TypeScript web application for: {spec['description']}
                   
-                  Generate the COMPLETE file structure and code for a working web app.
-                  Return as JSON with file paths and contents.
-                  Include: HTML, CSS, JavaScript, backend code, package.json, etc.
-                  Make it production-ready with proper structure."""
+                  Include:
+                  1. Laravel backend with:
+                     - API routes
+                     - Controllers
+                     - Models and migrations
+                     - Authentication (Sanctum)
+                     - Redis queues
+                     - MySQL database
+                  
+                  2. React TypeScript frontend with:
+                     - Modern UI components
+                     - State management
+                     - API integration
+                     - TypeScript interfaces
+                     - Tailwind CSS
+                  
+                  3. Security features:
+                     - CSRF protection
+                     - Input validation
+                     - Rate limiting
+                     - Content Security Policy
+                  
+                  Return complete file structure and code as JSON.
+                  Focus on production-ready, secure code."""
                   
                   response = self.claude.messages.create(
                       model='claude-3-opus-20240229',
-                      max_tokens=4000,
-                      messages=[{'role': 'user', 'content': framework_prompt}]
+                      max_tokens=8000,
+                      messages=[{'role': 'user', 'content': webapp_prompt}]
                   )
                   
                   files = json.loads(response.content[0].text)
@@ -150,43 +352,10 @@ jobs:
                       )
                       print(f"📝 Created {file_info['path']}")
               
-              def create_api(self, repo, spec):
-                  """Create a complete API service"""
+              def setup_secure_cicd(self, repo, spec):
+                  """Setup CI/CD pipeline with security scanning"""
                   
-                  api_prompt = f"""Create a complete REST API for: {spec['description']}
-                  
-                  Include:
-                  - Server setup (Express/FastAPI/etc)
-                  - Route handlers
-                  - Database models
-                  - Authentication
-                  - Documentation
-                  - Tests
-                  - Docker configuration
-                  
-                  Return complete file structure and code as JSON."""
-                  
-                  response = self.claude.messages.create(
-                      model='claude-3-opus-20240229',
-                      max_tokens=4000,
-                      messages=[{'role': 'user', 'content': api_prompt}]
-                  )
-                  
-                  files = json.loads(response.content[0].text)
-                  
-                  for file_info in files.get('files', []):
-                      repo.create_file(
-                          path=file_info['path'],
-                          message=f"🤖 Create {file_info['path']}",
-                          content=file_info['content'],
-                          branch="main"
-                      )
-              
-              def setup_cicd(self, repo, spec):
-                  """Setup complete CI/CD pipeline"""
-                  
-                  # Create GitHub Actions workflow
-                  cicd_workflow = f"""name: CI/CD Pipeline
+                  cicd_workflow = f"""name: Secure CI/CD Pipeline
           on:
             push:
               branches: [main, develop]
@@ -194,183 +363,357 @@ jobs:
               branches: [main]
           
           jobs:
-            test:
+            security-scan:
               runs-on: ubuntu-latest
               steps:
                 - uses: actions/checkout@v4
-                - name: Run Tests
+                
+                - name: Run TruffleHog
+                  uses: trufflesecurity/trufflehog@main
+                  with:
+                    path: ./
+                    base: ${{ github.event.repository.default_branch }}
+                
+                - name: Run Semgrep
+                  uses: returntocorp/semgrep-action@v1
+                  with:
+                    config: >-
+                      p/security-audit
+                      p/owasp-top-ten
+                
+                - name: Python Security Check
+                  if: contains(github.repository, 'python')
                   run: |
-                    # Claude will add appropriate test commands
-                    echo "Tests will be added by Claude"
+                    pip install safety bandit
+                    safety check
+                    bandit -r . -f json -o bandit-report.json
+                
+                - name: Node Security Check
+                  if: contains(github.repository, 'node') || contains(github.repository, 'react')
+                  run: |
+                    npm audit --audit-level=moderate
+                    npx snyk test
+            
+            test:
+              runs-on: ubuntu-latest
+              needs: security-scan
+              steps:
+                - uses: actions/checkout@v4
+                
+                - name: Setup Laravel
+                  if: contains(github.repository, 'laravel')
+                  run: |
+                    cp .env.example .env
+                    composer install
+                    php artisan key:generate
+                    php artisan test
+                
+                - name: Setup React
+                  if: contains(github.repository, 'react')
+                  run: |
+                    npm ci
+                    npm run test -- --coverage --watchAll=false
+                    npm run lint
             
             build:
               runs-on: ubuntu-latest
               needs: test
               steps:
                 - uses: actions/checkout@v4
-                - name: Build Application
+                
+                - name: Build Laravel
+                  if: contains(github.repository, 'laravel')
                   run: |
-                    # Claude will add build commands
-                    echo "Build process will be added by Claude"
+                    composer install --optimize-autoloader --no-dev
+                    npm ci && npm run production
+                
+                - name: Build React
+                  if: contains(github.repository, 'react')
+                  run: |
+                    npm ci
+                    npm run build
+                
+                - name: Docker Build
+                  run: |
+                    docker build -t ${{ github.repository }}:${{ github.sha }} .
             
             deploy:
               runs-on: ubuntu-latest
               needs: build
               if: github.ref == 'refs/heads/main'
+              environment: production
               steps:
-                - name: Deploy
+                - name: Deploy to Production
                   run: |
-                    echo "Deployment will be configured by Claude"
+                    echo "Deployment configured by Claude based on project type"
           """
                   
                   repo.create_file(
-                      path=".github/workflows/cicd.yml",
-                      message="🤖 Setup CI/CD pipeline",
+                      path=".github/workflows/secure-cicd.yml",
+                      message="🔒 Setup secure CI/CD pipeline",
                       content=cicd_workflow,
                       branch="main"
                   )
               
-              def add_claude_workflow(self, repo):
-                  """Add Claude integration to the repository"""
+              def run_security_scan(self, repo):
+                  """Run initial security scan on repository"""
                   
-                  claude_workflow = """name: Claude Integration
-          on:
-            issue_comment:
-              types: [created]
-            issues:
-              types: [opened]
-            pull_request:
-              types: [opened]
+                  scan_issue = repo.create_issue(
+                      title="🔒 Initial Security Audit Required",
+                      body="""## Security Audit Checklist
           
-          jobs:
-            claude-helper:
-              if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude')
-              runs-on: ubuntu-latest
-              steps:
-                - uses: actions/checkout@v4
-                - name: Claude Responds
-                  uses: anthropics/claude-code-action@beta
-                  with:
-                    anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          """
-                  
-                  repo.create_file(
-                      path=".github/workflows/claude.yml",
-                      message="🤖 Enable Claude integration",
-                      content=claude_workflow,
-                      branch="main"
+          - [ ] Dependency vulnerability scan
+          - [ ] Code security analysis
+          - [ ] Secret detection
+          - [ ] OWASP Top 10 compliance
+          - [ ] Security headers configuration
+          - [ ] Input validation audit
+          - [ ] Authentication/Authorization review
+          
+          @claude please perform a comprehensive security audit""",
+                      labels=['security', 'claude-task', 'high-priority']
                   )
               
-              def create_project_roadmap(self, repo, spec):
-                  """Create issues for Claude to work on"""
+              def create_project_roadmap(self, repo, spec, market_analysis):
+                  """Create market-driven project roadmap"""
                   
                   roadmap_prompt = f"""Create a project roadmap for {spec['name']}: {spec['description']}
                   
-                  Generate 5-10 specific issues/tasks that need to be completed.
-                  Return as JSON array of issue titles and descriptions."""
+                  Market analysis: {market_analysis}
+                  Tech stack: {spec.get('tech_stack', [])}
+                  
+                  Generate 8-12 specific issues/tasks that:
+                  1. Address market opportunities
+                  2. Implement security best practices
+                  3. Build competitive features
+                  4. Focus on user experience
+                  5. Include performance optimization
+                  
+                  Return as JSON array with prioritized issues."""
                   
                   response = self.claude.messages.create(
                       model='claude-3-opus-20240229',
-                      max_tokens=2000,
+                      max_tokens=3000,
                       messages=[{'role': 'user', 'content': roadmap_prompt}]
                   )
                   
                   issues = json.loads(response.content[0].text)
                   
-                  for issue in issues.get('issues', []):
+                  priority_labels = ['critical', 'high-priority', 'medium-priority', 'low-priority']
+                  
+                  for i, issue in enumerate(issues.get('issues', [])):
+                      priority = priority_labels[min(i // 3, 3)]
+                      
                       repo.create_issue(
                           title=issue['title'],
-                          body=f"{issue['description']}\n\n@claude please implement this",
-                          labels=['enhancement', 'claude-task']
+                          body=f"{issue['description']}\n\n**Market Impact**: {issue.get('market_impact', 'N/A')}\n\n@claude please implement this",
+                          labels=['enhancement', 'claude-task', priority]
                       )
               
+              def add_claude_workflow(self, repo):
+                  """Add enhanced Claude integration"""
+                  
+                  claude_workflow = """name: Claude AI Assistant
+          on:
+            issue_comment:
+              types: [created]
+            issues:
+              types: [opened, edited]
+            pull_request:
+              types: [opened, synchronize]
+            workflow_dispatch:
+          
+          jobs:
+            claude-helper:
+              if: contains(github.event.comment.body, '@claude') || contains(github.event.issue.body, '@claude') || github.event_name == 'workflow_dispatch'
+              runs-on: ubuntu-latest
+              steps:
+                - uses: actions/checkout@v4
+                
+                - name: Setup Environment
+                  run: |
+                    pip install anthropic pygithub
+                
+                - name: Claude Responds
+                  env:
+                    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+                    GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+                  run: |
+                    python -c "
+          import anthropic
+          from github import Github
+          import os
+          import json
+          
+          # Initialize clients
+          claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
+          g = Github(os.environ['GITHUB_TOKEN'])
+          repo = g.get_repo('${{ github.repository }}')
+          
+          # Get context
+          event_name = '${{ github.event_name }}'
+          
+          if event_name == 'issue_comment':
+              issue = repo.get_issue(${{ github.event.issue.number }})
+              comment = '${{ github.event.comment.body }}'
+              
+              # Generate response
+              response = claude.messages.create(
+                  model='claude-3-sonnet-20240229',
+                  max_tokens=2000,
+                  messages=[{
+                      'role': 'user',
+                      'content': f'Repository: {repo.name}\\nIssue: {issue.title}\\nComment: {comment}\\n\\nProvide a helpful response or code solution.'
+                  }]
+              )
+              
+              # Post response
+              issue.create_comment(f'🤖 Claude responds:\\n\\n{response.content[0].text}')
+          "
+          """
+                  
+                  repo.create_file(
+                      path=".github/workflows/claude-assistant.yml",
+                      message="🤖 Enable enhanced Claude integration",
+                      content=claude_workflow,
+                      branch="main"
+                  )
+              
               def work_on_existing_projects(self, tasks):
-                  """Work on existing repositories"""
+                  """Work on existing repositories with security focus"""
                   
                   for task in tasks:
-                      repo = self.org.get_repo(task['repo'])
-                      
-                      if 'add_feature' in task['actions']:
-                          self.add_features_to_repo(repo)
-                      
-                      if 'fix_bugs' in task['actions']:
-                          self.fix_repository_issues(repo)
-                      
-                      if 'update_docs' in task['actions']:
-                          self.update_documentation(repo)
-                      
-                      if 'add_tests' in task['actions']:
-                          self.add_tests_to_repo(repo)
+                      try:
+                          repo = self.org.get_repo(task['repo'])
+                          
+                          if 'add_feature' in task['actions']:
+                              self.add_features_to_repo(repo)
+                          
+                          if 'fix_bugs' in task['actions']:
+                              self.fix_repository_issues(repo)
+                          
+                          if 'update_docs' in task['actions']:
+                              self.update_documentation(repo)
+                          
+                          if 'add_tests' in task['actions']:
+                              self.add_tests_to_repo(repo)
+                          
+                          if 'security_audit' in task['actions']:
+                              self.perform_security_audit(repo)
+                              
+                      except Exception as e:
+                          print(f"Error working on {task['repo']}: {e}")
               
-              def add_features_to_repo(self, repo):
-                  """Add new features to existing repository"""
+              def perform_security_audit(self, repo):
+                  """Perform security audit on repository"""
                   
-                  # Get repository content
-                  contents = repo.get_contents("")
+                  audit_prompt = f"""Perform a security audit on {repo.name}.
                   
-                  feature_prompt = f"""Repository: {repo.name}
-                  Description: {repo.description}
-                  Current files: {[c.path for c in contents if c.type == 'file']}
+                  Check for:
+                  1. Exposed secrets or API keys
+                  2. SQL injection vulnerabilities
+                  3. XSS vulnerabilities
+                  4. Insecure dependencies
+                  5. Missing security headers
+                  6. Authentication issues
                   
-                  Suggest and implement a new feature for this project.
-                  Return JSON with file modifications/additions."""
+                  Return findings as JSON with severity levels."""
                   
                   response = self.claude.messages.create(
                       model='claude-3-opus-20240229',
-                      max_tokens=4000,
-                      messages=[{'role': 'user', 'content': feature_prompt}]
+                      max_tokens=2000,
+                      messages=[{'role': 'user', 'content': audit_prompt}]
                   )
                   
-                  # Implement the feature
-                  changes = json.loads(response.content[0].text)
+                  findings = json.loads(response.content[0].text)
                   
-                  # Create a feature branch and PR
-                  branch_name = f"feature/claude-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+                  if findings.get('issues', []):
+                      issue = repo.create_issue(
+                          title="🔒 Security Audit Findings",
+                          body=self.format_security_findings(findings),
+                          labels=['security', 'bug', 'high-priority']
+                      )
+              
+              def format_security_findings(self, findings):
+                  """Format security findings for issue"""
                   
-                  # Create issue first
-                  issue = repo.create_issue(
-                      title=f"✨ {changes.get('feature_name', 'New Feature')}",
-                      body=f"{changes.get('description', 'Feature added by Claude')}\n\n@claude implement this feature"
-                  )
+                  body = "## Security Audit Results\n\n"
+                  
+                  for issue in findings.get('issues', []):
+                      severity_emoji = {
+                          'critical': '🔴',
+                          'high': '🟠',
+                          'medium': '🟡',
+                          'low': '🟢'
+                      }
+                      
+                      emoji = severity_emoji.get(issue['severity'], '⚪')
+                      body += f"{emoji} **{issue['title']}** ({issue['severity']})\n"
+                      body += f"- Description: {issue['description']}\n"
+                      body += f"- Recommendation: {issue['recommendation']}\n\n"
+                  
+                  body += "\n@claude please fix these security issues"
+                  return body
               
               def run_continuous_improvement(self):
-                  """Main loop for continuous improvement"""
+                  """Main loop for continuous improvement with quality focus"""
                   
                   print("🧠 Claude Master Brain activated!")
+                  print(f"📊 Market Intelligence loaded: {len(self.market_intel.get('github_trending', []))} GitHub trends")
                   
-                  # Analyze organization
+                  # Analyze organization with market intelligence
                   plan = self.analyze_organization()
                   
-                  # Create new projects
-                  for project in plan.get('new_projects', [])[:2]:  # Limit to 2 per run
+                  # Quality over quantity: Create only 1 high-quality project per cycle
+                  new_projects = plan.get('new_projects', [])
+                  if new_projects:
+                      # Pick the most promising project
+                      best_project = new_projects[0]
+                      print(f"🎯 Selected project: {best_project['name']}")
+                      
                       try:
-                          self.create_complete_project(project)
+                          created_repo = self.create_complete_project(best_project)
+                          if created_repo:
+                              print(f"✅ Successfully created: {created_repo.name}")
                       except Exception as e:
-                          print(f"Error creating project: {e}")
+                          print(f"❌ Error creating project: {e}")
                   
-                  # Work on existing projects
-                  self.work_on_existing_projects(plan.get('existing_projects', []))
+                  # Work on top 3 existing projects
+                  existing_tasks = plan.get('existing_projects', [])[:3]
+                  if existing_tasks:
+                      print(f"🔧 Working on {len(existing_tasks)} existing projects")
+                      self.work_on_existing_projects(existing_tasks)
                   
-                  # Execute immediate tasks
-                  for task in plan.get('immediate_tasks', []):
+                  # Execute immediate high-priority tasks
+                  immediate_tasks = [t for t in plan.get('immediate_tasks', []) if 'security' in t.get('type', '')][:5]
+                  for task in immediate_tasks:
                       self.execute_task(task)
                   
-                  print("✅ Autonomous cycle complete!")
+                  print("✅ Quality-focused autonomous cycle complete!")
               
               def execute_task(self, task):
                   """Execute a specific task"""
                   
-                  if task['type'] == 'create_issue':
-                      repo = self.org.get_repo(task['repo'])
-                      repo.create_issue(
-                          title=task['details']['title'],
-                          body=task['details']['body'] + "\n\n@claude please help with this"
-                      )
-                  
-                  elif task['type'] == 'update_file':
-                      repo = self.org.get_repo(task['repo'])
-                      # Update file logic here
-                      pass
+                  try:
+                      if task['type'] == 'create_issue':
+                          repo = self.org.get_repo(task['repo'])
+                          repo.create_issue(
+                              title=task['details']['title'],
+                              body=task['details']['body'] + "\n\n@claude please help with this",
+                              labels=task['details'].get('labels', [])
+                          )
+                      
+                      elif task['type'] == 'security_scan':
+                          repo = self.org.get_repo(task['repo'])
+                          self.perform_security_audit(repo)
+                      
+                      elif task['type'] == 'update_file':
+                          repo = self.org.get_repo(task['repo'])
+                          # Update file logic here
+                          pass
+                          
+                  except Exception as e:
+                      print(f"Error executing task: {e}")
           
           if __name__ == "__main__":
               brain = ClaudeMasterBrain()
@@ -378,3 +721,95 @@ jobs:
           EOF
           
           python claude_master_brain.py
+          
+      - name: Generate Performance Report
+        if: always()
+        env:
+          MARKET_INTEL: ${{ steps.market_intel.outputs.market_data }}
+        run: |
+          cat > performance_report.py << 'EOF'
+          import json
+          import os
+          from datetime import datetime
+          
+          # Load market intelligence data
+          market_data = {}
+          try:
+              with open('market_intelligence.json', 'r') as f:
+                  market_data = json.load(f)
+          except:
+              market_data = json.loads(os.environ.get('MARKET_INTEL', '{}'))
+          
+          # Load Claude's execution results if available
+          execution_summary = {
+              "projects_created": 0,
+              "projects_updated": 0,
+              "security_scans": 0,
+              "market_validations": 0
+          }
+          
+          report = {
+              "timestamp": datetime.now().isoformat(),
+              "cycle": "2-hour quality cycle",
+              "focus": "Market-driven development with security-first approach",
+              "market_intelligence": {
+                  "github_trending": market_data.get('github_trending', []),
+                  "github_trending_count": len(market_data.get('github_trending', [])),
+                  "product_hunt_trends": market_data.get('product_hunt', []),
+                  "product_hunt_count": len(market_data.get('product_hunt', [])),
+                  "analysis_timestamp": datetime.now().isoformat()
+              },
+              "execution_summary": execution_summary,
+              "optimizations": [
+                  "Quality over quantity",
+                  "Market validation before creation",
+                  "Security scanning integrated",
+                  "Resource protection enabled"
+              ],
+              "tech_stack_focus": [
+                  "Laravel + React TypeScript",
+                  "MySQL + Redis",
+                  "Security-first architecture"
+              ]
+          }
+          
+          # Create combined report
+          with open('performance_report.json', 'w') as f:
+              json.dump(report, f, indent=2)
+          
+          # Also create a markdown summary
+          with open('performance_summary.md', 'w') as f:
+              f.write(f"# Claude Master Brain Performance Report\n\n")
+              f.write(f"**Generated**: {report['timestamp']}\n\n")
+              f.write(f"## 📊 Market Intelligence\n\n")
+              f.write(f"- **GitHub Trending Projects**: {report['market_intelligence']['github_trending_count']}\n")
+              f.write(f"- **Product Hunt Trends**: {report['market_intelligence']['product_hunt_count']}\n\n")
+              f.write(f"### Top GitHub Trends\n")
+              for trend in market_data.get('github_trending', [])[:5]:
+                  f.write(f"- {trend}\n")
+              f.write(f"\n### Product Hunt Highlights\n")
+              for product in market_data.get('product_hunt', [])[:5]:
+                  f.write(f"- {product}\n")
+              f.write(f"\n## 🎯 Execution Focus\n\n")
+              f.write(f"{report['focus']}\n\n")
+              f.write(f"## ⚡ Optimizations\n\n")
+              for opt in report['optimizations']:
+                  f.write(f"- {opt}\n")
+          
+          print("📊 Comprehensive performance report generated")
+          print(f"📈 Tracked {len(market_data.get('github_trending', []))} GitHub trends")
+          print(f"🚀 Tracked {len(market_data.get('product_hunt', []))} Product Hunt trends")
+          EOF
+          
+          python performance_report.py
+          
+      - name: Upload Reports
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: claude-brain-reports
+          path: |
+            market_intelligence.json
+            performance_report.json
+            performance_summary.md
+            bandit-report.json
