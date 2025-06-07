@@ -1,10 +1,17 @@
 name: Claude Master Autonomous System
+
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Every 2 hours - optimized for quality over quantity
+    # every 10 minutes
+    - cron: '*/10 * * * *'
   workflow_dispatch:
   repository_dispatch:
     types: [claude-command]
+
+# prevent overlapping runs
+concurrency:
+  group: claude-master-brain-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   claude-orchestrator:
@@ -16,29 +23,29 @@ jobs:
       actions: write
       packages: write
       security-events: write
-      
+
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
-          
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          
+
       - name: Install Dependencies
         run: |
           # Python dependencies
           pip install anthropic pygithub requests pyyaml beautifulsoup4 feedparser
           pip install safety bandit semgrep trufflehog3
-          
+
           # Node dependencies for security scanning
           npm install -g @npmcli/arborist snyk
-          
+
       - name: Market Intelligence Gathering
         id: market_intel
         run: |
@@ -48,59 +55,59 @@ jobs:
           import requests
           from bs4 import BeautifulSoup
           import feedparser
-          
+
           # Scrape GitHub Trending
           trending_url = "https://github.com/trending"
           response = requests.get(trending_url)
           soup = BeautifulSoup(response.text, 'html.parser')
-          
+
           trending_repos = []
           for repo in soup.select('.Box-row')[:10]:
               name = repo.select_one('h2 a')
               if name:
                   trending_repos.append(name.text.strip())
-          
+
           # Product Hunt RSS
           ph_feed = feedparser.parse('https://www.producthunt.com/feed')
           trending_products = [entry.title for entry in ph_feed.entries[:5]]
-          
+
           market_data = {
               "github_trending": trending_repos,
               "product_hunt": trending_products
           }
-          
+
           with open('market_intelligence.json', 'w') as f:
               json.dump(market_data, f)
-          
+
           # Write to GITHUB_OUTPUT
           with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
               f.write(f"market_data={json.dumps(market_data)}\n")
           EOF
-          
+
       - name: Security Baseline Check
         run: |
           # Create security policy template
           cat > SECURITY_TEMPLATE.md << 'EOF'
           # Security Policy
-          
+
           ## Supported Versions
-          
+
           | Version | Supported          |
           | ------- | ------------------ |
           | latest  | :white_check_mark: |
-          
+
           ## Reporting a Vulnerability
-          
+
           Please report security vulnerabilities to security@codewebmobile-ai.com
-          
+
           ## Security Measures
-          
+
           - Automated dependency scanning
           - Code security analysis with Semgrep
           - Secret detection with TruffleHog
           - Regular security audits
           EOF
-          
+
       - name: Create Claude Brain Script Part 1
         run: |
           cat > claude_brain_core.py << 'EOF'
@@ -113,7 +120,7 @@ jobs:
           import re
           import traceback
           from datetime import datetime
-          
+
           class ClaudeMasterBrain:
               def __init__(self):
                   self.claude = anthropic.Anthropic(api_key=os.environ['ANTHROPIC_API_KEY'])
@@ -121,47 +128,47 @@ jobs:
                   self.org = self.g.get_organization('CodeWebMobile-AI')
                   self.master_plan = []
                   self.market_intel = json.loads(os.environ.get('MARKET_INTEL', '{}'))
-                  
+
               def extract_json_from_response(self, text):
                   """Extract JSON from Claude's response, handling various formats"""
                   # Try to find JSON between ```json and ``` markers
                   json_match = re.search(r'```json\s*(.*?)\s*```', text, re.DOTALL)
                   if json_match:
                       return json_match.group(1)
-                  
+
                   # Try to find JSON between { and }
                   json_match = re.search(r'\{.*\}', text, re.DOTALL)
                   if json_match:
                       return json_match.group(0)
-                  
+
                   # Return original text if no patterns found
                   return text
-                  
+
               def analyze_market_opportunity(self, project_idea):
                   """Analyze market opportunity for a project idea"""
-                  
-                  market_prompt = f"""Analyze the market opportunity for: {project_idea}
-                  
+
+                  market_prompt = f\"\"\"Analyze the market opportunity for: {project_idea}
+
                   Current GitHub trends: {self.market_intel.get('github_trending', [])}
                   Product Hunt trends: {self.market_intel.get('product_hunt', [])}
-                  
+
                   Score this opportunity from 1-10 based on:
                   1. Market demand
                   2. Competition level
                   3. Technical feasibility
                   4. Revenue potential
                   5. Innovation factor
-                  
+
                   Be honest about saturated markets but also recognize execution and niche targeting can differentiate.
-                  
+
                   Return ONLY valid JSON in this exact format:
                   {{
                       "score": 1-10,
                       "analysis": "detailed reasoning",
                       "competitors": ["list of competitors"],
                       "unique_value_prop": "what makes this special"
-                  }}"""
-                  
+                  }}\"\"\"
+
                   try:
                       print(f"🔍 Analyzing market opportunity for: {project_idea}")
                       response = self.claude.messages.create(
@@ -169,15 +176,15 @@ jobs:
                           max_tokens=2000,
                           messages=[{'role': 'user', 'content': market_prompt}]
                       )
-                      
+
                       raw_response = response.content[0].text
                       print(f"📝 Raw Claude response: {raw_response[:200]}...")
-                      
+
                       json_text = self.extract_json_from_response(raw_response)
                       result = json.loads(json_text)
                       print(f"✅ Market analysis successful. Score: {result.get('score', 'N/A')}/10")
                       return result
-                      
+
                   except json.JSONDecodeError as e:
                       print(f"❌ JSON parsing error in market analysis:")
                       print(f"   Error: {e}")
@@ -194,31 +201,31 @@ jobs:
                       print(f"   Error message: {str(e)}")
                       print(f"   Traceback: {traceback.format_exc()}")
                       raise
-              
+
               def analyze_organization(self):
                   """Claude analyzes the entire organization state with market intelligence"""
                   repos = list(self.org.get_repos())
                   repo_names = [r.name for r in repos]
-                  
+
                   print(f"📊 Analyzing organization with {len(repos)} repositories")
                   print(f"   Repositories: {repo_names}")
                   print(f"   Market trends: {len(self.market_intel.get('github_trending', []))} GitHub, {len(self.market_intel.get('product_hunt', []))} Product Hunt")
-                  
-                  analysis_prompt = f"""You are the autonomous AI brain controlling CodeWebMobile-AI.
-                  
+
+                  analysis_prompt = f\"\"\"You are the autonomous AI brain controlling CodeWebMobile-AI.
+
                   Current repositories: {repo_names}
                   Market trends: {self.market_intel}
-                  
+
                   Analyze and decide what to do next. Focus on:
                   1. Trending technologies to adopt
                   2. Market gaps to fill
                   3. High ROI projects
                   4. Security improvements
                   5. Laravel + React TypeScript stack
-                  
+
                   Suggest 5-10 diverse project ideas based on current market trends and gaps.
                   Include a mix of different types: B2B SaaS, developer tools, AI applications, productivity tools, etc.
-                  
+
                   Return ONLY valid JSON with this structure:
                   {{
                       "new_projects": [
@@ -233,8 +240,8 @@ jobs:
                           {{"repo": "repo-name", "actions": ["add_feature", "security_audit"]}}
                       ],
                       "immediate_tasks": []
-                  }}"""
-                  
+                  }}\"\"\"
+
                   try:
                       print("🤖 Calling Claude API for organization analysis...")
                       response = self.claude.messages.create(
@@ -242,20 +249,20 @@ jobs:
                           max_tokens=4000,
                           messages=[{'role': 'user', 'content': analysis_prompt}]
                       )
-                      
+
                       raw_response = response.content[0].text
                       print(f"📝 Raw Claude response length: {len(raw_response)} characters")
                       print(f"📝 Response preview: {raw_response[:200]}...")
-                      
+
                       json_text = self.extract_json_from_response(raw_response)
                       print(f"🔍 Extracted JSON length: {len(json_text)} characters")
-                      
+
                       result = json.loads(json_text)
                       print(f"✅ Organization analysis successful")
                       print(f"   New projects suggested: {len(result.get('new_projects', []))}")
                       print(f"   Existing projects to update: {len(result.get('existing_projects', []))}")
                       return result
-                      
+
                   except json.JSONDecodeError as e:
                       print(f"❌ JSON parsing error in organization analysis:")
                       print(f"   Error: {e}")
@@ -277,25 +284,25 @@ jobs:
                       print(f"   Traceback: {traceback.format_exc()}")
                       raise
           EOF
-          
+
       - name: Create Claude Brain Script Part 2
         run: |
           cat > claude_brain_projects.py << 'EOF'
           from claude_brain_core import ClaudeMasterBrain
-          
+
           class ProjectCreator(ClaudeMasterBrain):
               def create_complete_project(self, project_spec):
                   """Create a complete project with market validation"""
-                  
+
                   # Market analysis
                   market_analysis = self.analyze_market_opportunity(project_spec['description'])
-                  
+
                   if market_analysis['score'] < 6:
                       print(f"❌ Skipping {project_spec['name']} - Market score: {market_analysis['score']}/10")
                       return None
-                  
+
                   print(f"🚀 Creating project: {project_spec['name']} (Market score: {market_analysis['score']}/10)")
-                  
+
                   # Create repository
                   repo = self.org.create_repo(
                       name=project_spec['name'],
@@ -305,69 +312,69 @@ jobs:
                       has_projects=True,
                       has_wiki=True
                   )
-                  
+
                   # Setup project
                   self.create_readme(repo, project_spec, market_analysis)
                   self.add_security_policy(repo)
                   self.setup_cicd(repo)
                   self.create_initial_issues(repo, project_spec)
-                  
+
                   return repo
-              
+
               def create_readme(self, repo, spec, market_analysis):
                   """Create market-driven README"""
-                  
-                  readme = f"""# {spec['name']}
-          
+
+                  readme = f\"\"\"# {spec['name']}
+
           > {spec['description']}
-          
+
           ## 📊 Market Analysis
-          
+
           **Market Score**: {market_analysis['score']}/10
-          
+
           **Analysis**: {market_analysis['analysis']}
-          
+
           **Unique Value**: {market_analysis['unique_value_prop']}
-          
+
           ## 🚀 Tech Stack
-          
+
           - Laravel (Backend)
           - React TypeScript (Frontend)
           - MySQL (Database)
           - Redis (Cache/Queues)
-          
+
           ## 🔒 Security
-          
+
           Security-first development with automated scanning.
-          
+
           ## 🤖 Powered by Claude
-          """
-                  
+          \"\"\"
+
                   repo.create_file(
                       path="README.md",
                       message="🤖 Create README",
                       content=readme,
                       branch="main"
                   )
-              
+
               def add_security_policy(self, repo):
                   """Add security policy"""
                   with open('SECURITY_TEMPLATE.md', 'r') as f:
                       content = f.read()
-                  
+
                   repo.create_file(
                       path="SECURITY.md",
                       message="🔒 Add security policy",
                       content=content,
                       branch="main"
                   )
-              
+
               def setup_cicd(self, repo):
                   """Setup CI/CD pipeline"""
-                  
+
                   workflow = """name: CI/CD Pipeline
           on: [push, pull_request]
-          
+
           jobs:
             security:
               runs-on: ubuntu-latest
@@ -377,14 +384,14 @@ jobs:
                   uses: trufflesecurity/trufflehog@main
                   with:
                     path: ./
-            
+
             test:
               runs-on: ubuntu-latest
               steps:
                 - uses: actions/checkout@v4
                 - name: Run Tests
                   run: echo "Tests configured by Claude"
-            
+
             build:
               runs-on: ubuntu-latest
               needs: [security, test]
@@ -393,17 +400,17 @@ jobs:
                 - name: Build
                   run: echo "Build configured by Claude"
           """
-                  
+
                   repo.create_file(
                       path=".github/workflows/cicd.yml",
                       message="🔧 Setup CI/CD",
                       content=workflow,
                       branch="main"
                   )
-              
+
               def create_initial_issues(self, repo, spec):
                   """Create initial issues"""
-                  
+
                   issues = [
                       {
                           "title": "🚀 Initial Laravel Backend Setup",
@@ -418,7 +425,7 @@ jobs:
                           "body": "Perform comprehensive security audit\n\n@claude please implement"
                       }
                   ]
-                  
+
                   for issue in issues:
                       repo.create_issue(
                           title=issue["title"],
@@ -426,7 +433,7 @@ jobs:
                           labels=['enhancement', 'claude-task']
                       )
           EOF
-          
+
       - name: Create Claude Brain Script Part 3
         run: |
           cat > claude_brain_main.py << 'EOF'
@@ -434,11 +441,11 @@ jobs:
           import json
           import sys
           from datetime import datetime
-          
+
           class MasterExecutor(ProjectCreator):
               def create_suggestion_issue(self, suggestions):
                   """Create a GitHub issue with project suggestions for admin review"""
-                  
+
                   # Find or create the main repository for issues
                   try:
                       suggestions_repo = self.org.get_repo('.github')
@@ -450,15 +457,15 @@ jobs:
                       else:
                           print("❌ No repository found to create suggestion issue")
                           return None
-                  
+
                   # Build issue body
                   issue_body = f"## 🚀 Project Suggestions - {datetime.now().strftime('%B %d, %Y')}\n\n"
                   issue_body += f"*Generated from {len(self.market_intel.get('github_trending', []))} GitHub trends and {len(self.market_intel.get('product_hunt', []))} Product Hunt trends*\n\n"
-                  
+
                   for i, (project, analysis) in enumerate(suggestions, 1):
                       score = analysis.get('score', 'N/A')
                       score_emoji = '🟢' if score >= 8 else '🟡' if score >= 6 else '🔴'
-                      
+
                       issue_body += f"### {i}. {project['name']} {score_emoji} (Score: {score}/10)\n"
                       issue_body += f"**Type**: {project.get('type', 'webapp')}\n"
                       issue_body += f"**Description**: {project['description']}\n"
@@ -466,7 +473,7 @@ jobs:
                       issue_body += f"**Market Analysis**: {analysis.get('analysis', 'N/A')}\n"
                       issue_body += f"**Competitors**: {', '.join(analysis.get('competitors', []))}\n"
                       issue_body += f"**Unique Value**: {analysis.get('unique_value_prop', 'N/A')}\n\n"
-                  
+
                   issue_body += "---\n\n"
                   issue_body += "## 📋 Admin Actions\n\n"
                   issue_body += "To create selected projects, comment with one of these formats:\n"
@@ -474,7 +481,7 @@ jobs:
                   issue_body += "- `@claude create all` - Create all suggested projects\n"
                   issue_body += "- `@claude create 8+` - Create all projects scoring 8 or above\n\n"
                   issue_body += "*This issue will be automatically closed when new suggestions are generated.*"
-                  
+
                   # Close previous suggestion issues
                   try:
                       open_issues = suggestions_repo.get_issues(state='open', labels=['project-suggestions'])
@@ -483,7 +490,7 @@ jobs:
                           issue.create_comment("🔒 Closed: New suggestions have been generated.")
                   except Exception as e:
                       print(f"⚠️ Could not close previous issues: {e}")
-                  
+
                   # Create new issue
                   try:
                       new_issue = suggestions_repo.create_issue(
@@ -496,76 +503,75 @@ jobs:
                   except Exception as e:
                       print(f"❌ Failed to create suggestion issue: {e}")
                       return None
-              
+
               def work_on_existing_projects(self, tasks):
                   """Work on existing repositories"""
-                  
+
                   for task in tasks[:3]:  # Limit to 3 projects
                       try:
                           repo = self.org.get_repo(task['repo'])
-                          
+
                           if 'security_audit' in task.get('actions', []):
                               self.perform_security_audit(repo)
-                          
+
                           if 'add_feature' in task.get('actions', []):
                               self.add_feature_issue(repo)
-                              
+
                       except Exception as e:
                           print(f"❌ Error working on {task['repo']}: {e}")
                           print(f"   Task details: {task}")
-              
+
               def perform_security_audit(self, repo):
                   """Create security audit issue"""
-                  
+
                   repo.create_issue(
                       title="🔒 Security Audit Required",
                       body="Perform security audit:\n- Dependency scan\n- Code analysis\n- Secret detection\n\n@claude please audit",
                       labels=['security', 'claude-task']
                   )
-              
+
               def add_feature_issue(self, repo):
                   """Add feature request"""
-                  
+
                   repo.create_issue(
                       title="✨ New Feature: Enhance User Experience",
                       body="Add new feature based on market trends\n\n@claude please implement",
                       labels=['enhancement', 'claude-task']
                   )
-              
+
               def run_continuous_improvement(self):
                   """Main execution loop"""
-                  
+
                   print("🧠 Claude Master Brain activated!")
                   print(f"📊 Market data loaded: {len(self.market_intel.get('github_trending', []))} GitHub trends, {len(self.market_intel.get('product_hunt', []))} Product Hunt trends")
-                  
+
                   try:
                       # Get action plan
                       print("📋 Analyzing organization...")
                       plan = self.analyze_organization()
-                      
-                      # Analyze all suggested projects
-                      new_projects = plan.get('new_projects', [])
+
+                      # Analyze all suggested projects (limit to 20)
+                      new_projects = plan.get('new_projects', [])[:20]
                       suggestions = []
-                      
+
                       if new_projects:
                           print(f"🏗️ Found {len(new_projects)} new project suggestions")
                           print("🔍 Analyzing market opportunities for each project...")
-                          
-                          for i, project in enumerate(new_projects[:10], 1):  # Limit to 10 suggestions
+
+                          for i, project in enumerate(new_projects, 1):
                               try:
-                                  print(f"\n📦 [{i}/{min(len(new_projects), 10)}] Analyzing: {project.get('name', 'Unknown')}")
+                                  print(f"\n📦 [{i}/{len(new_projects)}] Analyzing: {project.get('name', 'Unknown')}")
                                   analysis = self.analyze_market_opportunity(project['description'])
                                   suggestions.append((project, analysis))
                               except Exception as e:
                                   print(f"   ⚠️ Failed to analyze: {e}")
-                                  # Add with error analysis
                                   suggestions.append((project, {
                                       'score': 'Error',
                                       'analysis': f'Analysis failed: {str(e)}',
                                       'competitors': [],
                                       'unique_value_prop': 'Unable to analyze'
                                   }))
-                          
+
                           # Create suggestion issue
                           if suggestions:
                               print(f"\n📝 Creating suggestion issue with {len(suggestions)} projects...")
@@ -588,7 +594,7 @@ jobs:
                       else:
                           print("📭 No new projects suggested")
                           summary = {"suggestions_created": 0}
-                      
+
                       # Work on existing projects
                       existing_projects = plan.get('existing_projects', [])
                       if existing_projects:
@@ -596,7 +602,7 @@ jobs:
                           self.work_on_existing_projects(existing_projects)
                       else:
                           print("📭 No existing project updates suggested")
-                      
+
                       # Save execution summary
                       summary.update({
                           "timestamp": datetime.now().isoformat(),
@@ -604,15 +610,14 @@ jobs:
                           "existing_projects_updated": len(existing_projects),
                           "status": "success"
                       })
-                      
+
                   except Exception as e:
                       print(f"❌ Critical error in continuous improvement cycle:")
                       print(f"   Error type: {type(e).__name__}")
                       print(f"   Error message: {str(e)}")
                       import traceback
                       print(f"   Full traceback:\n{traceback.format_exc()}")
-                      
-                      # Save error summary
+
                       summary = {
                           "timestamp": datetime.now().isoformat(),
                           "projects_analyzed": 0,
@@ -620,20 +625,18 @@ jobs:
                           "error": str(e),
                           "error_type": type(e).__name__
                       }
-                      
-                      # Exit with error code
+
                       with open('execution_summary.json', 'w') as f:
                           json.dump(summary, f, indent=2)
                       sys.exit(1)
-                  
-                  # Save successful execution summary
+
                   with open('execution_summary.json', 'w') as f:
                       json.dump(summary, f, indent=2)
-                  
+
                   print("\n✅ Suggestion cycle complete!")
                   if 'issue_url' in summary and summary['issue_url']:
                       print(f"📌 Review suggestions at: {summary['issue_url']}")
-          
+
           if __name__ == "__main__":
               try:
                   executor = MasterExecutor()
@@ -646,7 +649,7 @@ jobs:
                   print(f"   Full traceback:\n{traceback.format_exc()}")
                   sys.exit(1)
           EOF
-          
+
       - name: Execute Claude Master Brain
         id: claude_brain
         continue-on-error: true
@@ -656,7 +659,7 @@ jobs:
           MARKET_INTEL: ${{ steps.market_intel.outputs.market_data }}
         run: |
           python claude_brain_main.py
-          
+
       - name: Generate Performance Report
         if: always()
         env:
@@ -667,7 +670,7 @@ jobs:
           import json
           import os
           from datetime import datetime
-          
+
           # Load market intelligence data
           market_data = {}
           try:
@@ -675,7 +678,7 @@ jobs:
                   market_data = json.load(f)
           except:
               market_data = json.loads(os.environ.get('MARKET_INTEL', '{}'))
-          
+
           # Load execution summary if available
           execution_summary = {}
           try:
@@ -683,13 +686,13 @@ jobs:
                   execution_summary = json.load(f)
           except:
               pass
-          
+
           # Check Claude Brain execution status
           claude_brain_status = os.environ.get('CLAUDE_BRAIN_OUTCOME', 'unknown')
-          
+
           report = {
               "timestamp": datetime.now().isoformat(),
-              "cycle": "2-hour quality cycle",
+              "cycle": "10-minute quality cycle",
               "focus": "Market-driven development with security-first approach",
               "market_intelligence": {
                   "github_trending": market_data.get('github_trending', []),
@@ -712,11 +715,11 @@ jobs:
                   "Security-first architecture"
               ]
           }
-          
+
           # Create combined report
           with open('performance_report.json', 'w') as f:
               json.dump(report, f, indent=2)
-          
+
           # Also create a markdown summary
           with open('performance_summary.md', 'w') as f:
               f.write(f"# Claude Master Brain Performance Report\n\n")
@@ -735,7 +738,6 @@ jobs:
               if execution_summary:
                   f.write(f"- **Status**: {execution_summary.get('status', 'unknown')}\n")
                   f.write(f"- **Projects Analyzed**: {execution_summary.get('projects_analyzed', 0)}\n")
-                  f.write(f"- **New Project Attempted**: {execution_summary.get('new_project_attempted', False)}\n")
                   if 'error' in execution_summary:
                       f.write(f"- **Error Type**: {execution_summary.get('error_type', 'unknown')}\n")
                       f.write(f"- **Error Message**: {execution_summary.get('error', 'unknown')}\n")
@@ -746,15 +748,15 @@ jobs:
               f.write(f"## ⚡ Optimizations\n\n")
               for opt in report['optimizations']:
                   f.write(f"- {opt}\n")
-          
+
           print("📊 Comprehensive performance report generated")
           print(f"📈 Tracked {len(market_data.get('github_trending', []))} GitHub trends")
           print(f"🚀 Tracked {len(market_data.get('product_hunt', []))} Product Hunt trends")
           print(f"🤖 Claude Brain Status: {claude_brain_status}")
           EOF
-          
+
           python performance_report.py
-          
+
       - name: Upload Reports
         if: always()
         uses: actions/upload-artifact@v4
@@ -765,3 +767,12 @@ jobs:
             performance_report.json
             performance_summary.md
             execution_summary.json
+
+      - name: Trigger next cycle
+        if: always()
+        run: |
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            https://api.github.com/repos/${{ github.repository }}/dispatches \
+            -d '{"event_type":"claude-command"}'
