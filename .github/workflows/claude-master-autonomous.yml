@@ -1,10 +1,4 @@
-with open('market_intelligence.json', 'w') as f:
-              json.dump(market_data, f)
-          
-          # Write to GITHUB_OUTPUT
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"market_data={json.dumps(market_data)}\n")
-          EOFname: Claude Master Autonomous System
+name: Claude Master Autonomous System
 on:
   schedule:
     - cron: '0 */2 * * *'  # Every 2 hours - optimized for quality over quantity
@@ -77,7 +71,9 @@ jobs:
           with open('market_intelligence.json', 'w') as f:
               json.dump(market_data, f)
           
-          print(f"::set-output name=market_data::{json.dumps(market_data)}")
+          # Write to GITHUB_OUTPUT
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
+              f.write(f"market_data={json.dumps(market_data)}\n")
           EOF
           
       - name: Security Baseline Check
