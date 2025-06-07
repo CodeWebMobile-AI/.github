@@ -35,6 +35,7 @@ jobs:
           from github import Github
           import json
           import os
+          import re
           
           print('🤖 Claude AI activating for CodeWebMobile-AI...')
           
@@ -50,13 +51,14 @@ jobs:
           prompt = f"""You are the AI controller of the CodeWebMobile-AI GitHub organization.
           Current repositories: {[r.name for r in repos]}
           
-          Decide what to create or work on. Respond with JSON:
+          Create a new repository. Choose an interesting project idea.
+          
+          Respond with ONLY JSON, no other text:
           {{
             "action": "create_repo",
-            "name": "example-project",
-            "description": "What this project does"
-          }}
-          """
+            "name": "your-chosen-name",
+            "description": "Description of what this project does"
+          }}"""
           
           response = claude.messages.create(
               model='claude-3-opus-20240229',
@@ -64,19 +66,68 @@ jobs:
               messages=[{'role': 'user', 'content': prompt}]
           )
           
-          # Parse Claude's decision
-          decision = json.loads(response.content[0].text)
+          # Extract JSON from response
+          response_text = response.content[0].text
+          print(f'Claude response: {response_text}')
+          
+          # Try to extract JSON from the response
+          try:
+              # First try direct parsing
+              decision = json.loads(response_text)
+          except:
+              # If that fails, try to extract JSON from the text
+              json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+              if json_match:
+                  decision = json.loads(json_match.group())
+              else:
+                  # Fallback: create a default project
+                  decision = {
+                      "action": "create_repo",
+                      "name": "ai-assistant-bot",
+                      "description": "An AI-powered assistant bot created by Claude"
+                  }
+          
           print(f'Claude decided: {decision}')
           
           if decision['action'] == 'create_repo':
-              # Create new repository
-              new_repo = org.create_repo(
-                  name=decision['name'],
-                  description=decision['description'],
-                  auto_init=True,
-                  public=True
-              )
-              print(f'✅ Created: {new_repo.html_url}')
+              # Check if repo already exists
+              existing_repos = [r.name for r in repos]
+              if decision['name'] in existing_repos:
+                  print(f'Repository {decision["name"]} already exists')
+              else:
+                  # Create new repository
+                  new_repo = org.create_repo(
+                      name=decision['name'],
+                      description=f"🤖 {decision['description']}",
+                      auto_init=True,
+                      public=True
+                  )
+                  print(f'✅ Created: {new_repo.html_url}')
+                  
+                  # Add initial README content
+                  readme_content = f"""# {decision['name']}
+          
+          {decision['description']}
+          
+          ## About
+          This project was created autonomously by Claude AI as part of the CodeWebMobile-AI organization.
+          
+          ## Features
+          - 🤖 AI-Generated
+          - 🚀 Auto-maintained
+          - 📝 Self-documenting
+          
+          ## Status
+          Under active development by AI
+          """
+                  
+                  new_repo.create_file(
+                      path="README.md",
+                      message="🤖 Update README with project details",
+                      content=readme_content,
+                      branch="main"
+                  )
+                  print('📝 Added README.md')
           EOF
           
           python claude_control.py
