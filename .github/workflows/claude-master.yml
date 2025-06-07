@@ -28,7 +28,7 @@ jobs:
       - name: Claude Takes Control
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}  # CHANGED: Now using PAT
+          GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}
         run: |
           cat > claude_control.py << 'EOF'
           import anthropic
@@ -36,6 +36,7 @@ jobs:
           import json
           import os
           import re
+          import time
           
           print('🤖 Claude AI activating for CodeWebMobile-AI...')
           
@@ -72,15 +73,12 @@ jobs:
           
           # Try to extract JSON from the response
           try:
-              # First try direct parsing
               decision = json.loads(response_text)
           except:
-              # If that fails, try to extract JSON from the text
               json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
               if json_match:
                   decision = json.loads(json_match.group())
               else:
-                  # Fallback: create a default project
                   decision = {
                       "action": "create_repo",
                       "name": "ai-assistant-bot",
@@ -95,16 +93,16 @@ jobs:
               if decision['name'] in existing_repos:
                   print(f'Repository {decision["name"]} already exists')
               else:
-                  # Create new repository (FIXED: use private=False)
+                  # Create new repository WITHOUT auto_init to avoid conflicts
                   new_repo = org.create_repo(
                       name=decision['name'],
                       description=f"🤖 {decision['description']}",
-                      auto_init=True,
-                      private=False  # FIXED: changed from public=True
+                      auto_init=False,  # Changed to False
+                      private=False
                   )
                   print(f'✅ Created: {new_repo.html_url}')
                   
-                  # Add initial README content
+                  # Now create a proper README
                   readme_content = f"""# {decision['name']}
           
           {decision['description']}
@@ -119,15 +117,91 @@ jobs:
           
           ## Status
           Under active development by AI
+          
+          ## Tech Stack
+          - To be determined by Claude AI
+          
+          ## Getting Started
+          Coming soon - Claude AI will add installation and usage instructions.
           """
                   
+                  # Create README.md
                   new_repo.create_file(
                       path="README.md",
-                      message="🤖 Update README with project details",
+                      message="🤖 Initial commit - Project created by Claude AI",
                       content=readme_content,
                       branch="main"
                   )
                   print('📝 Added README.md')
+                  
+                  # Create a basic .gitignore
+                  gitignore_content = """# Python
+          __pycache__/
+          *.py[cod]
+          *$py.class
+          .Python
+          env/
+          venv/
+          .env
+          
+          # Node
+          node_modules/
+          npm-debug.log*
+          yarn-debug.log*
+          yarn-error.log*
+          
+          # IDE
+          .vscode/
+          .idea/
+          *.swp
+          *.swo
+          
+          # OS
+          .DS_Store
+          Thumbs.db
+          """
+                  
+                  new_repo.create_file(
+                      path=".gitignore",
+                      message="🤖 Add .gitignore",
+                      content=gitignore_content,
+                      branch="main"
+                  )
+                  print('📝 Added .gitignore')
+                  
+                  # Let Claude decide what kind of project to build
+                  project_prompt = f"""Now that you've created the repository '{decision['name']}', 
+                  decide what initial files to create. This is for: {decision['description']}
+                  
+                  Respond with JSON listing 2-3 initial files to create:
+                  {{
+                    "files": [
+                      {{
+                        "path": "filename.ext",
+                        "content": "file contents",
+                        "description": "what this file does"
+                      }}
+                    ]
+                  }}"""
+                  
+                  project_response = claude.messages.create(
+                      model='claude-3-opus-20240229',
+                      max_tokens=4000,
+                      messages=[{'role': 'user', 'content': project_prompt}]
+                  )
+                  
+                  try:
+                      project_plan = json.loads(project_response.content[0].text)
+                      for file_spec in project_plan.get('files', []):
+                          new_repo.create_file(
+                              path=file_spec['path'],
+                              message=f"🤖 Create {file_spec['path']} - {file_spec.get('description', '')}",
+                              content=file_spec['content'],
+                              branch="main"
+                          )
+                          print(f"📝 Created {file_spec['path']}")
+                  except Exception as e:
+                      print(f"Could not create additional files: {e}")
           EOF
           
           python claude_control.py
