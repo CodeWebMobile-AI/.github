@@ -1,0 +1,138 @@
+name: DeepSeek Direct Execution
+
+on:
+  workflow_dispatch:
+    inputs:
+      command:
+        description: 'Command to execute (e.g., "create a Python script that...")'
+        required: true
+      
+      add_files:
+        description: 'Files to add to context (comma-separated paths)'
+        required: false
+        default: ''
+
+jobs:
+  execute-deepseek:
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      
+      - name: Install Dependencies
+        run: |
+          pip install openai pydantic python-dotenv rich prompt_toolkit
+      
+      - name: Save DeepSeek Script
+        run: |
+          # Save your original script
+          cat > deepseek_engineer.py << 'EOF'
+          ${{ '{{ INSERT YOUR ORIGINAL SCRIPT HERE }}' }}
+          EOF
+      
+      - name: Create Automation Script
+        run: |
+          cat > run_automation.py << 'EOF'
+          import subprocess
+          import sys
+          import os
+          
+          # Get inputs
+          command = sys.argv[1]
+          files_to_add = sys.argv[2].split(',') if len(sys.argv) > 2 and sys.argv[2] else []
+          
+          # Create input file for the interactive script
+          inputs = []
+          
+          # Add files if specified
+          for file_path in files_to_add:
+              if file_path.strip():
+                  inputs.append(f"/add {file_path.strip()}")
+          
+          # Add the main command
+          inputs.append(command)
+          
+          # Add exit command
+          inputs.append("exit")
+          
+          # Write inputs to file
+          with open('deepseek_inputs.txt', 'w') as f:
+              f.write('\n'.join(inputs))
+          
+          # Run the script with inputs
+          result = subprocess.run(
+              ['python', 'deepseek_engineer.py'],
+              stdin=open('deepseek_inputs.txt', 'r'),
+              capture_output=True,
+              text=True
+          )
+          
+          print("=== OUTPUT ===")
+          print(result.stdout)
+          if result.stderr:
+              print("=== ERRORS ===")
+              print(result.stderr)
+          
+          sys.exit(result.returncode)
+          EOF
+      
+      - name: Execute DeepSeek Command
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          python run_automation.py "${{ github.event.inputs.command }}" "${{ github.event.inputs.add_files }}"
+      
+      - name: Check for Changes
+        id: check_changes
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "📝 Files were created or modified"
+            git status --short
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "✅ No files were changed"
+          fi
+      
+      - name: Commit Changes
+        if: steps.check_changes.outputs.has_changes == 'true'
+        run: |
+          git config --local user.email "deepseek-engineer[bot]@users.noreply.github.com"
+          git config --local user.name "DeepSeek Engineer[bot]"
+          
+          git add .
+          git commit -m "🤖 DeepSeek: ${{ github.event.inputs.command }}
+          
+          Executed by DeepSeek Engineer via GitHub Actions"
+          
+          git push
+      
+      - name: Summary
+        run: |
+          echo "## 🤖 DeepSeek Execution Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Command" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "${{ github.event.inputs.command }}" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ github.event.inputs.add_files }}" != "" ]; then
+            echo "### Context Files" >> $GITHUB_STEP_SUMMARY
+            echo "${{ github.event.inputs.add_files }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "### Changes" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ steps.check_changes.outputs.has_changes }}" == "true" ]; then
+            echo "✅ Files were created/modified and committed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "ℹ️ No file changes were made" >> $GITHUB_STEP_SUMMARY
+          fi
