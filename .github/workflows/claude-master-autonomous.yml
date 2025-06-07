@@ -152,6 +152,8 @@ jobs:
                   4. Revenue potential
                   5. Innovation factor
                   
+                  Be honest about saturated markets but also recognize execution and niche targeting can differentiate.
+                  
                   Return ONLY valid JSON in this exact format:
                   {{
                       "score": 1-10,
@@ -213,6 +215,9 @@ jobs:
                   3. High ROI projects
                   4. Security improvements
                   5. Laravel + React TypeScript stack
+                  
+                  Suggest 5-10 diverse project ideas based on current market trends and gaps.
+                  Include a mix of different types: B2B SaaS, developer tools, AI applications, productivity tools, etc.
                   
                   Return ONLY valid JSON with this structure:
                   {{
@@ -428,8 +433,70 @@ jobs:
           from claude_brain_projects import ProjectCreator
           import json
           import sys
+          from datetime import datetime
           
           class MasterExecutor(ProjectCreator):
+              def create_suggestion_issue(self, suggestions):
+                  """Create a GitHub issue with project suggestions for admin review"""
+                  
+                  # Find or create the main repository for issues
+                  try:
+                      suggestions_repo = self.org.get_repo('.github')
+                  except:
+                      # If .github repo doesn't exist, use the first available repo
+                      repos = list(self.org.get_repos())
+                      if repos:
+                          suggestions_repo = repos[0]
+                      else:
+                          print("❌ No repository found to create suggestion issue")
+                          return None
+                  
+                  # Build issue body
+                  issue_body = f"## 🚀 Project Suggestions - {datetime.now().strftime('%B %d, %Y')}\n\n"
+                  issue_body += f"*Generated from {len(self.market_intel.get('github_trending', []))} GitHub trends and {len(self.market_intel.get('product_hunt', []))} Product Hunt trends*\n\n"
+                  
+                  for i, (project, analysis) in enumerate(suggestions, 1):
+                      score = analysis.get('score', 'N/A')
+                      score_emoji = '🟢' if score >= 8 else '🟡' if score >= 6 else '🔴'
+                      
+                      issue_body += f"### {i}. {project['name']} {score_emoji} (Score: {score}/10)\n"
+                      issue_body += f"**Type**: {project.get('type', 'webapp')}\n"
+                      issue_body += f"**Description**: {project['description']}\n"
+                      issue_body += f"**Tech Stack**: {', '.join(project.get('tech_stack', []))}\n"
+                      issue_body += f"**Market Analysis**: {analysis.get('analysis', 'N/A')}\n"
+                      issue_body += f"**Competitors**: {', '.join(analysis.get('competitors', []))}\n"
+                      issue_body += f"**Unique Value**: {analysis.get('unique_value_prop', 'N/A')}\n\n"
+                  
+                  issue_body += "---\n\n"
+                  issue_body += "## 📋 Admin Actions\n\n"
+                  issue_body += "To create selected projects, comment with one of these formats:\n"
+                  issue_body += "- `@claude create 1,3,5` - Create specific projects by number\n"
+                  issue_body += "- `@claude create all` - Create all suggested projects\n"
+                  issue_body += "- `@claude create 8+` - Create all projects scoring 8 or above\n\n"
+                  issue_body += "*This issue will be automatically closed when new suggestions are generated.*"
+                  
+                  # Close previous suggestion issues
+                  try:
+                      open_issues = suggestions_repo.get_issues(state='open', labels=['project-suggestions'])
+                      for issue in open_issues:
+                          issue.edit(state='closed')
+                          issue.create_comment("🔒 Closed: New suggestions have been generated.")
+                  except Exception as e:
+                      print(f"⚠️ Could not close previous issues: {e}")
+                  
+                  # Create new issue
+                  try:
+                      new_issue = suggestions_repo.create_issue(
+                          title=f"🚀 Project Suggestions - {datetime.now().strftime('%B %d, %Y')}",
+                          body=issue_body,
+                          labels=['project-suggestions', 'awaiting-admin-review']
+                      )
+                      print(f"✅ Created suggestion issue: {new_issue.html_url}")
+                      return new_issue
+                  except Exception as e:
+                      print(f"❌ Failed to create suggestion issue: {e}")
+                      return None
+              
               def work_on_existing_projects(self, tasks):
                   """Work on existing repositories"""
                   
@@ -476,42 +543,67 @@ jobs:
                       print("📋 Analyzing organization...")
                       plan = self.analyze_organization()
                       
-                      # Create one quality project
+                      # Analyze all suggested projects
                       new_projects = plan.get('new_projects', [])
+                      suggestions = []
+                      
                       if new_projects:
                           print(f"🏗️ Found {len(new_projects)} new project suggestions")
-                          try:
-                              project = new_projects[0]
-                              print(f"📦 Attempting to create project: {project.get('name', 'Unknown')}")
-                              result = self.create_complete_project(project)
-                              if result:
-                                  print(f"✅ Successfully created project: {result.name}")
+                          print("🔍 Analyzing market opportunities for each project...")
+                          
+                          for i, project in enumerate(new_projects[:10], 1):  # Limit to 10 suggestions
+                              try:
+                                  print(f"\n📦 [{i}/{min(len(new_projects), 10)}] Analyzing: {project.get('name', 'Unknown')}")
+                                  analysis = self.analyze_market_opportunity(project['description'])
+                                  suggestions.append((project, analysis))
+                              except Exception as e:
+                                  print(f"   ⚠️ Failed to analyze: {e}")
+                                  # Add with error analysis
+                                  suggestions.append((project, {
+                                      'score': 'Error',
+                                      'analysis': f'Analysis failed: {str(e)}',
+                                      'competitors': [],
+                                      'unique_value_prop': 'Unable to analyze'
+                                  }))
+                          
+                          # Create suggestion issue
+                          if suggestions:
+                              print(f"\n📝 Creating suggestion issue with {len(suggestions)} projects...")
+                              issue = self.create_suggestion_issue(suggestions)
+                              if issue:
+                                  summary = {
+                                      "suggestions_created": len(suggestions),
+                                      "issue_url": issue.html_url,
+                                      "issue_number": issue.number
+                                  }
                               else:
-                                  print(f"⚠️ Project creation returned None (likely due to low market score)")
-                          except Exception as e:
-                              print(f"❌ Project creation failed:")
-                              print(f"   Error type: {type(e).__name__}")
-                              print(f"   Error message: {str(e)}")
-                              import traceback
-                              print(f"   Traceback: {traceback.format_exc()}")
+                                  summary = {
+                                      "suggestions_created": len(suggestions),
+                                      "issue_url": None,
+                                      "issue_number": None
+                                  }
+                          else:
+                              print("⚠️ No suggestions to create issue")
+                              summary = {"suggestions_created": 0}
                       else:
                           print("📭 No new projects suggested")
+                          summary = {"suggestions_created": 0}
                       
                       # Work on existing projects
                       existing_projects = plan.get('existing_projects', [])
                       if existing_projects:
-                          print(f"🔧 Working on {len(existing_projects)} existing projects")
+                          print(f"\n🔧 Working on {len(existing_projects)} existing projects")
                           self.work_on_existing_projects(existing_projects)
                       else:
                           print("📭 No existing project updates suggested")
                       
                       # Save execution summary
-                      summary = {
+                      summary.update({
                           "timestamp": datetime.now().isoformat(),
-                          "projects_analyzed": len(plan.get('existing_projects', [])),
-                          "new_project_attempted": len(new_projects) > 0,
+                          "projects_analyzed": len(suggestions),
+                          "existing_projects_updated": len(existing_projects),
                           "status": "success"
-                      }
+                      })
                       
                   except Exception as e:
                       print(f"❌ Critical error in continuous improvement cycle:")
@@ -524,7 +616,6 @@ jobs:
                       summary = {
                           "timestamp": datetime.now().isoformat(),
                           "projects_analyzed": 0,
-                          "new_project_attempted": False,
                           "status": "error",
                           "error": str(e),
                           "error_type": type(e).__name__
@@ -539,10 +630,11 @@ jobs:
                   with open('execution_summary.json', 'w') as f:
                       json.dump(summary, f, indent=2)
                   
-                  print("✅ Cycle complete!")
+                  print("\n✅ Suggestion cycle complete!")
+                  if 'issue_url' in summary and summary['issue_url']:
+                      print(f"📌 Review suggestions at: {summary['issue_url']}")
           
           if __name__ == "__main__":
-              from datetime import datetime
               try:
                   executor = MasterExecutor()
                   executor.run_continuous_improvement()
