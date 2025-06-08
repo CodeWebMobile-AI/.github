@@ -40,8 +40,6 @@ jobs:
           # Node dependencies for security scanning
           npm install -g @npmcli/arborist snyk
 
-      # Skip linting and smoke test here - files don't exist yet
-
       - name: Market Intelligence Gathering
         id: market_intel
         run: |
@@ -89,35 +87,6 @@ jobs:
           if 'GITHUB_OUTPUT' in os.environ:
               with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
                   f.write(f"market_data={json.dumps(market_data)}\n")
-          EOF
-
-      - name: Validate Created Python Files
-        run: |
-          echo "Validating Python syntax..."
-          python -m py_compile claude_brain_core.py claude_brain_projects.py claude_brain_main.py
-          echo "✅ Python files are valid"
-
-      - name: Security Baseline Check
-        run: |
-          cat > SECURITY_TEMPLATE.md << 'EOF'
-          # Security Policy
-
-          ## Supported Versions
-
-          | Version | Supported          |
-          | ------- | ------------------ |
-          | latest  | :white_check_mark: |
-
-          ## Reporting a Vulnerability
-
-          Please report security vulnerabilities to security@codewebmobile-ai.com
-
-          ## Security Measures
-
-          - Automated dependency scanning
-          - Code security analysis with Semgrep
-          - Secret detection with TruffleHog
-          - Regular security audits
           EOF
 
       - name: Create Claude Brain Script Part 1
@@ -261,6 +230,12 @@ jobs:
               executor = ClaudeExecutor()
               executor.run_continuous_improvement()
           EOF
+
+      - name: Validate Created Python Files
+        run: |
+          echo "Validating Python syntax..."
+          python -m py_compile claude_brain_core.py claude_brain_projects.py claude_brain_main.py
+          echo "✅ Python files are valid"
 
       - name: Execute Claude Master Brain
         id: claude_brain
