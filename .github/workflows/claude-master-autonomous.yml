@@ -138,7 +138,7 @@ jobs:
 
       - name: Create Claude Brain Script Part 2
         run: |
-          cat > claude_brain_projects.py << EOF
+          cat > claude_brain_projects.py << 'EOF'
           from claude_brain_core import ClaudeMasterBrain
 
           class ProjectCreator(ClaudeMasterBrain):
@@ -159,29 +159,29 @@ jobs:
               def create_readme(self, repo, spec, analysis):
                   """Create market-driven README"""
                   readme = f"""
-# {spec['name']}
+          # {spec['name']}
 
-> {spec['description']}
+          > {spec['description']}
 
-## 📊 Market Analysis
+          ## 📊 Market Analysis
 
-**Market Score**: {analysis['score']}/10
+          **Market Score**: {analysis['score']}/10
 
-**Analysis**: {analysis['analysis']}
+          **Analysis**: {analysis['analysis']}
 
-## 🚀 Tech Stack
+          ## 🚀 Tech Stack
 
-- Laravel (Backend)
-- React TypeScript (Frontend)
-- MySQL (Database)
-- Redis (Cache/Queues)
+          - Laravel (Backend)
+          - React TypeScript (Frontend)
+          - MySQL (Database)
+          - Redis (Cache/Queues)
 
-## 🔒 Security
+          ## 🔒 Security
 
-Security-first development with automated scanning.
+          Security-first development with automated scanning.
 
-## 🤖 Powered by Claude
-"""
+          ## 🤖 Powered by Claude
+          """
                   repo.create_file(
                       path="README.md",
                       message="🤖 Create README",
@@ -207,8 +207,8 @@ Security-first development with automated scanning.
         continue-on-error: true
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GITHUB_TOKEN:       ${{ secrets.CLAUDE_PAT }}
-          MARKET_INTEL:       ${{ steps.market_intel.outputs.market_data }}
+          GITHUB_TOKEN: ${{ secrets.CLAUDE_PAT }}
+          MARKET_INTEL: ${{ steps.market_intel.outputs.market_data }}
         run: python claude_brain_main.py
 
       - name: Generate Performance Report
@@ -216,6 +216,7 @@ Security-first development with automated scanning.
         run: |
           cat > performance_report.py << 'EOF'
           import json
+          import os
           from datetime import datetime
 
           market = json.load(open('market_intelligence.json', 'r'))
